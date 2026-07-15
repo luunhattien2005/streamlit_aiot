@@ -74,7 +74,7 @@ with tab_dashboard:
         df = pd.DataFrame(logs_list)
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df = df.sort_values(by='timestamp', ascending=False).reset_index(drop=True)
-        st.dataframe(df[['timestamp', 'person_name', 'action']], use_container_width=True)
+        st.dataframe(df[['timestamp', 'person_name', 'action']], width='stretch')
     else:
         st.info("Chưa có dữ liệu.")
 
