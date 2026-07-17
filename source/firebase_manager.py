@@ -86,14 +86,14 @@ def get_history_logs():
     return {
         "mock_log_001": {
             "timestamp": "2026-07-16 08:30:00",
-            "image_url": "https://via.placeholder.com/300/09f/fff.png?text=Face+1",
-            "person_name": "Tiến Lưu (Mock)",
+            "image_url": "./source/Face_History/cat.png",
+            "person_name": "Tiến Lưu (Gay)",
             "action": "Mở cửa thành công",
             "bbox": {"x": 50, "y": 50, "w": 100, "h": 100}
         },
         "mock_log_002": {
             "timestamp": "2026-07-16 09:15:22",
-            "image_url": "https://via.placeholder.com/300/f00/fff.png?text=Stranger",
+            "image_url": "./source/Face_History/Imposter.png",
             "person_name": "Người lạ",
             "action": "Từ chối mở cửa",
             "bbox": {"x": 60, "y": 40, "w": 90, "h": 110}
