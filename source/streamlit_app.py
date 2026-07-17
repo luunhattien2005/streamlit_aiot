@@ -43,7 +43,7 @@ if "main_password" not in st.session_state:
 
 
 # --- DIỆN MẠO 1: TRANG ĐĂNG NHẬP ---
-if st.session_state.logged_in:
+if not st.session_state.logged_in:
     # Căn giữa khung đăng nhập bằng cách chia cột
     col1, col2, col3 = st.columns([3, 2, 3])
     
