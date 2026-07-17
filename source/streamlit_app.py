@@ -20,7 +20,7 @@ st.set_page_config(page_title="Hệ thống Cửa thông minh AIoT", layout="wid
 with open("source/style.css", "r", encoding="utf-8") as f:
     custom_css = f.read()
 
-st.markdown(f"<style>{custom_css}</style>", unsafe_allow_html=True)s
+st.markdown(f"<style>{custom_css}</style>", unsafe_allow_html=True)
 
 
 
@@ -38,7 +38,7 @@ if "main_password" not in st.session_state:
 
 
 # --- DIỆN MẠO 1: TRANG ĐĂNG NHẬP ---
-if  st.session_state.logged_in:
+if not st.session_state.logged_in:
     # Căn giữa khung đăng nhập bằng cách chia cột
     col1, col2, col3 = st.columns([3, 2, 3])
     
