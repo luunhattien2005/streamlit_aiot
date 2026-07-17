@@ -127,15 +127,111 @@ else:
         "👥 Quản lý kho dữ liệu Face"
     ],  key='Tab-Selection')
     
+
+
+
     # ----------------------------------------------------
     # TAB 1: BẢNG ĐIỀU KHIỂN TRUNG TÂM
     # ----------------------------------------------------
     with tab_control:
-        st.subheader("Trạng thái thiết bị & Nút điều khiển nhanh")
-        # Gợi ý thiết kế của bạn: Đặt các nút bấm mở cửa thủ công, xem camera live, hoặc thông số pin/kết nối của ESP32-CAM tại đây.
+        st.markdown("<h2 style='text-align: left;'>📊 Hệ thống điều khiển thiết bị</h2>", unsafe_allow_html=True)
+        st.write("")
+
+        # 1. KHỞI TẠO TRẠNG THÁI ẢO
+        if "door_locked" not in st.session_state:
+            st.session_state.door_locked = True
+        if "light_mode" not in st.session_state:
+            st.session_state.light_mode = "Auto"
+        if "light_on" not in st.session_state:
+            st.session_state.light_on = False
+
+        # Tự động cập nhật trạng thái đèn vật lý dựa trên Chế độ Đèn được chọn
+        if st.session_state.light_mode == "Bật":
+            st.session_state.light_on = True
+        elif st.session_state.light_mode == "Tắt":
+            st.session_state.light_on = False
+        # Nếu là "Auto", trạng thái đèn sẽ do cảm biến quyết định (ở đây mặc định tạm thời là Tắt)
+        elif st.session_state.light_mode == "Auto":
+            st.session_state.light_on = False 
+
+        # 2. CHIA BỐ CỤC LAYOUT THÀNH 2 CỘT: CỬA (TRÁI) & ĐÈN (PHẢI)
+        col_door, col_light = st.columns(2, gap="large")
+
+        # --- CỘT BÊN TRÁI: ĐIỀU KHIỂN CỬA RA VÀO ---
+        with col_door:
+            st.markdown("### 🚪 Quản lý Cửa ra vào")
+            
+            if st.session_state.door_locked:
+                st.markdown(
+                    """
+                    <div style='background-color: #ffebe6; padding: 20px; border-radius: 10px; text-align: center; border-left: 6px solid #ff4d4f;'>
+                        <h4 style='color: #ff4d4f; margin: 0; font-size: 18px;'>🔒 TRẠNG THÁI: CỬA ĐANG KHÓA</h4>
+                        <p style='color: #666; margin: 5px 0 0 0; font-size: 13px;'>Hệ thống đang bảo vệ an toàn</p>
+                    </div>
+                    """, unsafe_allow_html=True
+                )
+                st.write("")
+                if st.button("🔓 Click để mở cửa từ xa", type="primary", use_container_width=True):
+                    st.session_state.door_locked = False
+                    st.toast("⚡ Lệnh mở cửa đã được gửi đến thiết bị!")
+                    time.sleep(0.5)
+                    st.rerun()
+            else:
+                st.markdown(
+                    """
+                    <div style='background-color: #e6f7ff; padding: 20px; border-radius: 10px; text-align: center; border-left: 6px solid #1890ff;'>
+                        <h4 style='color: #1890ff; margin: 0; font-size: 18px;'>🔓 TRẠNG THÁI: CỬA ĐANG MỞ</h4>
+                        <p style='color: #666; margin: 5px 0 0 0; font-size: 13px;'>Cửa đang mở, vui lòng chú ý</p>
+                    </div>
+                    """, unsafe_allow_html=True
+                )
+                st.write("")
+                if st.button("🔒 Click để khóa cửa lại", type="secondary", use_container_width=True):
+                    st.session_state.door_locked = True
+                    st.toast("⚡ Lệnh khóa cửa đã được gửi đến thiết bị!")
+                    time.sleep(0.5)
+                    st.rerun()
+
+        # --- CỘT BÊN PHẢI: ĐIỀU KHIỂN ĐÈN HỆ THỐNG ---
+        with col_light:
+            st.markdown("### 💡 Hệ thống Đèn chiếu sáng")
+            
+            if st.session_state.light_on:
+                st.markdown(
+                    """
+                    <div style='background-color: #fffbe6; padding: 20px; border-radius: 10px; text-align: center; border-left: 6px solid #faad14;'>
+                        <h4 style='color: #faad14; margin: 0; font-size: 18px;'>💡 TRẠNG THÁI: ĐÈN ĐANG BẬT</h4>
+                        <p style='color: #666; margin: 5px 0 0 0; font-size: 13px;'>Hệ thống đèn đang tiêu thụ điện năng</p>
+                    </div>
+                    """, unsafe_allow_html=True
+                )
+            else:
+                st.markdown(
+                    """
+                    <div style='background-color: #f5f5f5; padding: 20px; border-radius: 10px; text-align: center; border-left: 6px solid #bfbfbf;'>
+                        <h4 style='color: #595959; margin: 0; font-size: 18px;'>🌑 TRẠNG THÁI: ĐÈN ĐANG TẮT</h4>
+                        <p style='color: #666; margin: 5px 0 0 0; font-size: 13px;'>Khu vực hiện tại không bật đèn</p>
+                    </div>
+                    """, unsafe_allow_html=True
+                )
+            
+            st.write("")
+            
+            # Chọn chế độ hoạt động của đèn
+            chosen_mode = st.segmented_control(
+                "Thay đổi chế độ hoạt động của đèn:",
+                options=["Bật", "Tắt", "Auto"],
+                default=st.session_state.light_mode,
+                key="light_mode_control"
+            )
+            
+            # Cập nhật cấu hình khi người dùng đổi chế độ trên giao diện
+            if chosen_mode and chosen_mode != st.session_state.light_mode:
+                st.session_state.light_mode = chosen_mode
+                st.toast(f"⚙️ Đã chuyển đèn sang chế độ: {chosen_mode}")
+                time.sleep(0.3)
+                st.rerun()
         
-
-
 
 
 
