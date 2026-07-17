@@ -25,7 +25,7 @@ def get_face_embedding(img):
             img_path=img, 
             model_name="VGG-Face", 
             enforce_detection=True,
-            detector_backend="ssd"
+            detector_backend="mtcnn"
         )
 
         # Mô hình Facenet
@@ -94,7 +94,7 @@ def warmup_ai_model():
             img_path=dummy_img, 
             model_name="VGG-Face", 
             enforce_detection=True,
-            detector_backend="ssd"
+            detector_backend="mtcnn"
         )
 
         # Mô hình Facenet

@@ -377,7 +377,8 @@ else:
                 # Chuyển đổi dữ liệu ảnh tải lên thành ma trận OpenCV
                 file_bytes = np.asarray(bytearray(test_file.read()), dtype=np.uint8)
                 opencv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-                
+                opencv_img = cv2.cvtColor(opencv_img, cv2.COLOR_BGR2RGB)
+
                 col_img, col_res = st.columns(2, gap="medium")
                 with col_img:
                     st.image(test_file, caption="Ảnh đang kiểm tra", width='stretch')
@@ -421,6 +422,7 @@ else:
                         # Đọc ảnh sang định dạng OpenCV
                         file_bytes = np.asarray(bytearray(reg_file.read()), dtype=np.uint8)
                         opencv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+                        opencv_img = cv2.cvtColor(opencv_img, cv2.COLOR_BGR2RGB)
                         
                         with st.spinner("AI đang quét khuôn mặt mẫu..."):
                             embedding, bbox, err = get_face_embedding(opencv_img)
