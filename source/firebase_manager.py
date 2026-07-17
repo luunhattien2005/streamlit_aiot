@@ -64,7 +64,7 @@
 import streamlit as st
 import time
 
-# 🛑 CHẾ ĐỘ GIẢ LẬP (MOCK MODE)
+# CHẾ ĐỘ GIẢ LẬP (MOCK MODE)
 # Không cần import firebase_admin hay credentials
 
 @st.cache_resource

@@ -13,6 +13,7 @@ def fetch_image_from_url(url):
     except Exception as e:
         return None, f"Lỗi tải ảnh: {str(e)}"
 
+
 def get_face_embedding(img):
     """Trích xuất mảng vector đặc trưng và tọa độ khuôn mặt"""
     try:
@@ -28,11 +29,13 @@ def get_face_embedding(img):
         return None, None, f"Lỗi AI: {str(e)}"
     return None, None, "Lỗi không xác định"
 
+
 def calculate_cosine_distance(source_emb, test_emb):
     """Tính toán khoảng cách Cosine chuẩn chỉnh"""
     a = np.array(source_emb)
     b = np.array(test_emb)
     return 1 - np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
 
 def find_best_match(target_embedding, registered_db):
     """So sánh Vector lấy được với Database đã đăng ký"""
