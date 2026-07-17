@@ -56,7 +56,7 @@ if not st.session_state.logged_in:
         with st.form("login_form"):
             username = st.text_input("Tài khoản admin", placeholder="Nhập tên tài khoản...")
             password = st.text_input("Mật khẩu", type="password", placeholder="Nhập mật khẩu...")
-            submit_button = st.form_submit_button("Đăng nhập", use_container_width=True)
+            submit_button = st.form_submit_button("Đăng nhập", width='stretch')
             
             if submit_button:
                 # Tạm thời cài tài khoản cố định để bạn dễ chạy thử test giao diện
@@ -78,11 +78,11 @@ else:
         st.markdown("<h1 class='sidebar-title'>Cài đặt</h1>", unsafe_allow_html=True)
         st.markdown("<h1 class='sidebar-admin'>Tài khoản: Admin</h1>", unsafe_allow_html=True)
 
-        if st.button("Thay đổi mật khẩu", type="primary", key="change-btn", use_container_width=True):
+        if st.button("Thay đổi mật khẩu", type="primary", key="change-btn", width='stretch'):
             st.session_state.show_change_pw = not st.session_state.show_change_pw
             st.rerun() 
 
-        if st.button("Đăng xuất", type="primary", key="logout-btn", use_container_width=True):
+        if st.button("Đăng xuất", type="primary", key="logout-btn", width='stretch'):
             st.session_state.logged_in = False
             st.session_state.show_change_pw = False 
             st.rerun()
@@ -97,7 +97,7 @@ else:
                 new_pw = st.text_input("Mật khẩu mới", type="password", placeholder="Nhập mật khẩu mới...")
                 confirm_pw = st.text_input("Xác nhận mật khẩu", type="password", placeholder="Nhập lại mật khẩu mới...")
                 
-                submit_change = st.form_submit_button("Xác nhận đổi", use_container_width=True)
+                submit_change = st.form_submit_button("Xác nhận đổi", width='stretch')
                 if submit_change:
                     # Kiểm tra logic đổi mật khẩu
                     if (old_pw == "" or new_pw == "" or confirm_pw == ""):
@@ -182,7 +182,7 @@ else:
                 # Tạo bảng tương tác cho phép chọn dòng
                 selection = st.dataframe(
                     view_df,
-                    use_container_width=True,
+                    width='stretch',
                     hide_index=True,
                     on_select="rerun",
                     selection_mode="single-row"
@@ -211,12 +211,12 @@ else:
                     
                     if img_path_or_url.startswith("http://") or img_path_or_url.startswith("https://"):
                         # Trường hợp 1: Nếu là link URL (Dữ liệu mock của bạn)
-                        st.image(img_path_or_url, caption="Ảnh từ Database (URL)", use_container_width=True)
+                        st.image(img_path_or_url, caption="Ảnh từ Database (URL)", width='stretch')
                     else:
                         # Trường hợp 2: Nếu là file local (Ví dụ: face_1.jpg)
                         local_path = img_path_or_url
                         if os.path.exists(local_path):
-                            st.image(local_path, caption=f"Ảnh local: {img_path_or_url}", use_container_width=True)
+                            st.image(local_path, caption=f"Ảnh local: {img_path_or_url}", width='stretch')
                         else:
                             st.error(f"❌ Không tìm thấy file `{img_path_or_url}` trong thư mục `Face_History/`.")         
                 else:
@@ -284,7 +284,7 @@ else:
                 
                 col_img, col_res = st.columns(2, gap="medium")
                 with col_img:
-                    st.image(test_file, caption="Ảnh đang kiểm tra", use_container_width=True)
+                    st.image(test_file, caption="Ảnh đang kiểm tra", width='stretch')
                     
                 with col_res:
                     st.markdown("#### ⚙️ Kết quả xử lý từ DeepFace:")
@@ -316,7 +316,7 @@ else:
                 reg_name = st.text_input("Nhập họ và tên người đăng ký:", placeholder="Ví dụ: Nguyễn Văn A")
                 reg_file = st.file_uploader("Tải ảnh chân dung rõ mặt:", type=["jpg", "jpeg", "png"], key="reg_face_upload")
                 
-                if st.button("Đăng ký vào hệ thống", type="primary", use_container_width=True):
+                if st.button("Đăng ký vào hệ thống", type="primary", width='stretch'):
                     if not reg_name.strip():
                         st.error("Vui lòng không để trống tên người đăng ký!")
                     elif reg_file is None:
@@ -372,7 +372,7 @@ else:
                             "Tên file ảnh": data.get("image_path")
                         })
                     df_db = pd.DataFrame(list_data)
-                    st.dataframe(df_db[["Tên thành viên", "Tên file ảnh"]], use_container_width=True, hide_index=True)
+                    st.dataframe(df_db[["Tên thành viên", "Tên file ảnh"]], width='stretch', hide_index=True)
                     
                     st.markdown("---")
                     st.markdown("### 🗑️ Xóa thành viên khỏi hệ thống")
@@ -384,7 +384,7 @@ else:
                         format_func=lambda x: registered_db[x]["name"]
                     )
                     
-                    if st.button("Xác nhận xóa hoàn toàn", type="secondary", use_container_width=True):
+                    if st.button("Xác nhận xóa hoàn toàn", type="secondary", width='stretch'):
                         # 1. Tìm và xóa file ảnh vật lý trong thư mục Face_Database trên ổ cứng
                         file_to_delete = registered_db[delete_uid].get("image_path")
                         if file_to_delete:
