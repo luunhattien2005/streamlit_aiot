@@ -63,8 +63,8 @@ def find_best_match(target_embedding, registered_db):
     
     best_match_name = "Người lạ"
     min_distance = float("inf")
-    # Ngưỡng (Threshold) chuẩn của model VGG-Face dùng Cosine là 0.68
-    VGG_FACE_THRESHOLD = 0.68 
+    # Ngưỡng (Threshold) chuẩn của model VGG-Face dùng Cosine
+    VGG_FACE_THRESHOLD = 0.40 
     FACENET_THRESHOLD  = 0.40
 
     for uid, data in registered_db.items():
