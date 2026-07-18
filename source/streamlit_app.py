@@ -17,7 +17,7 @@ from telegram_bot import send_telegram_alert
 
 # Cấu hình của model nhận diện khuôn mắt (sẽ config sau)
 from face_engine import (fetch_image_from_url, get_face_embedding, find_best_match, warmup_ai_model)
-init_firebase() # Khởi tạo kết nối Firebase
+init_firebase()   # Khởi tạo kết nối Firebase
 warmup_ai_model() # Gọi hàm khởi động ngầm ngay khi app Streamlit vừa bật lên
 
 
@@ -43,10 +43,41 @@ if "show_change_pw" not in st.session_state:
 if "main_password" not in st.session_state:
     st.session_state.main_password = "123456"
 
+if "door_locked" not in st.session_state:
+    st.session_state.door_locked = True
+
+if "light_mode" not in st.session_state:
+    st.session_state.light_mode = "Auto"
+
+if "light_on" not in st.session_state:
+    st.session_state.light_on = False
+
+if "telebot_mode" not in st.session_state:
+    st.session_state.telebot_mode = "Tắt"
 
 
 
 
+# --- CÁC HOẠT ĐỘNG NGẰM TRONG TRANG WEB ---
+Req = get_new_requests()
+if (Req):
+    # Checking object Face (using function here)
+    if (Req):
+        # Open first security level 
+        # Store history opening door information
+        # . . . .
+        print("hihihaha")
+
+    else:
+        # Store history security information
+
+        # Use telebot to send warning
+        if (st.session_state.telebot_mode == "Bật"):
+            send_telegram_alert(0, "Temporary message")
+
+    
+
+    
 # --- DIỆN MẠO 1: TRANG ĐĂNG NHẬP ---
 if not st.session_state.logged_in:
     # Căn giữa khung đăng nhập bằng cách chia cột
@@ -120,107 +151,25 @@ else:
 
 
 
-
     # Tiêu đề chính của Web Dashboard
     st.title("Hệ thống Cửa thông minh AIoT")
     st.write("---") # Đường gạch ngang phân chia
 
     # Khởi tạo 3 Tabs theo đúng ý tưởng mới của bạn
-    tab_engine, tab_control, tab_history, tab_database = st.tabs([
-        "⚙️ Lắng Nghe Mở Cửa (Engine)", 
+    tab_control, tab_history, tab_database = st.tabs([
         "📊 Bảng điều khiển trung tâm", 
         "📜 Lịch sử ra vào", 
         "👥 Quản lý kho dữ liệu Face"
-    ])
+    ], key="Tab-Selection")
 
-    # --- TAB 1: ENGINE ---
-    with tab_engine:
-        requests_data = get_new_requests()
-        
-        has_pending = False
-        if requests_data:
-            for req_id, req_data in requests_data.items():
-                if req_data.get('status') == 'pending':
-                    has_pending = True
-                    break
-                    
-        is_testing = st.session_state.get("test_face_upload") is not None
-        is_registering = st.session_state.get("reg_face_upload") is not None
-        
-        if is_testing or is_registering:
-            st.warning("Trạng thái: Tạm dừng trực quét để xử lý dữ liệu thủ công...")
-        elif not has_pending:
-            count = st_autorefresh(interval=2000, limit=20000, key="fbreq")
-            st.write(f"Trạng thái: Đang trực quét... (Ping: {count})")
-        else:
-            st.write("Trạng thái: Đang xử lý ảnh từ Camera (Tạm dừng quét để tránh xung đột AI).")
-    
-        if requests_data:
-            for req_id, req_data in requests_data.items():
-                if req_data.get('status') == 'pending':
-                    st.info(f"🔔 Phát hiện yêu cầu mới: {req_id}")
-                    img_url = req_data.get('image_url', '')
-                    img_data, err_msg = fetch_image_from_url(img_url)
-                    
-                    if img_data is not None:
-                        with st.spinner("AI đang phân tích khuôn mặt..."):
-                            # 1. Lấy vector khuôn mặt
-                            target_emb, bbox, ai_err = get_face_embedding(img_data)
-                            
-                            person_name = "Lỗi nhận diện"
-                            if target_emb:
-                                # 2. Tải database người nhà từ Firebase
-                                registered_db = get_registered_faces()
-                                # 3. Quét Brute Force tìm người giống nhất
-                                if registered_db:
-                                    person_name = find_best_match(target_emb, registered_db)
-                                else:
-                                    person_name = "Người lạ (Chưa có ai trong database)"
-                            elif ai_err:
-                                person_name = "Người lạ (Không thấy rõ mặt)"
-                        
-                        action_text = "Mở cửa thành công" if "Người lạ" not in person_name and "Lỗi" not in person_name else "Từ chối mở cửa"
-                        
-                        add_history_log({
-                            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            'image_url': img_url,
-                            'person_name': person_name,
-                            'action': action_text,
-                            'bbox': bbox if bbox else {}
-                        })
-                        update_request_status(req_id, 'completed')
-                        
-                        # Gửi cảnh báo Telegram nếu từ chối mở cửa (Người lạ)
-                        if action_text == "Từ chối mở cửa":
-                            msg = f"🚨 *CẢNH BÁO AN NINH*\n\nPhát hiện đối tượng: *{person_name}*\nHành động: Từ chối mở cửa."
-                            send_telegram_alert(img_url, msg)
-                            
-                        st.success(f"✅ Đã xử lý xong! Cửa: {action_text}")
-                        time.sleep(2)
-                        st.rerun()
-                    else:
-                        st.error(err_msg)
-                        update_request_status(req_id, 'failed')
-                        time.sleep(2)
-                        st.rerun()
-        else:
-            st.write("Không có yêu cầu mở cửa nào mới.")
 
 
     # ----------------------------------------------------
-    # TAB 2: BẢNG ĐIỀU KHIỂN TRUNG TÂM
+    # TAB 1: BẢNG ĐIỀU KHIỂN TRUNG TÂM
     # ----------------------------------------------------
     with tab_control:
         st.markdown("<h2 style='text-align: left;'>📊 Hệ thống điều khiển thiết bị</h2>", unsafe_allow_html=True)
         st.write("")
-
-        # 1. KHỞI TẠO TRẠNG THÁI ẢO
-        if "door_locked" not in st.session_state:
-            st.session_state.door_locked = True
-        if "light_mode" not in st.session_state:
-            st.session_state.light_mode = "Auto"
-        if "light_on" not in st.session_state:
-            st.session_state.light_on = False
 
         # Tự động cập nhật trạng thái đèn vật lý dựa trên Chế độ Đèn được chọn
         if st.session_state.light_mode == "Bật":
@@ -308,12 +257,25 @@ else:
                 st.toast(f"⚙️ Đã chuyển đèn sang chế độ: {chosen_mode}")
                 time.sleep(0.3)
                 st.rerun()
+
+            # Chọn chế độ hoạt đông của telebot
+            chosen_mode = st.segmented_control(
+                "Bật thông báo thông qua telebot:",
+                options=["Bật", "Tắt"],
+                default=st.session_state.telebot_mode,
+                key="telebot_control"
+            )
+
+            # Cập nhật khi đổi trạng thái telebot
+            if chosen_mode != st.session_state.telebot_mode:
+                st.session_state.telebot_mode = chosen_mode
+                st.rerun()
         
 
 
 
     # ----------------------------------------------------
-    # TAB 3: LỊCH SỬ RA VÀO
+    # TAB 2: LỊCH SỬ RA VÀO
     # ----------------------------------------------------
     with tab_history:        
         st.markdown("<h2 style='text-align: left;'>Nhật ký quét khuôn mặt</h2>", unsafe_allow_html=True)
@@ -408,11 +370,8 @@ else:
         
 
 
-
-
-
     # ----------------------------------------------------
-    # TAB 4: QUẢN LÝ KHO DỮ LIỆU FACE
+    # TAB 3: QUẢN LÝ KHO DỮ LIỆU FACE
     # ----------------------------------------------------
     with tab_database:
         st.markdown("<h2 style='text-align: left;'>Quản lý kho dữ liệu Face</h2>", unsafe_allow_html=True)
