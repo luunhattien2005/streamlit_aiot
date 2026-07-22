@@ -2,78 +2,114 @@ import streamlit as st
 import time
 import pandas as pd
 from datetime import datetime
-import time
 import json
 import os
 import cv2
 import numpy as np
 from streamlit_autorefresh import st_autorefresh
 
-# Cấu hình của firebase (sẽ config sau)
-from firebase_manager import (init_firebase, get_new_requests, get_history_logs, update_request_status, add_history_log, get_registered_faces, register_new_face)
-
-# Cấu hình của telegram bot (sẽ config sau)
+from firebase_manager import (
+    init_firebase, get_new_requests, get_history_logs, delete_processed_request, add_history_log,
+    load_registered_db, save_registered_db, upload_to_imgbb
+)
 from telegram_bot import send_telegram_alert
-
-# Cấu hình của model nhận diện khuôn mắt (sẽ config sau)
 from face_engine import (fetch_image_from_url, get_face_embedding, find_best_match, warmup_ai_model)
-init_firebase()   # Khởi tạo kết nối Firebase
-warmup_ai_model() # Gọi hàm khởi động ngầm ngay khi app Streamlit vừa bật lên
 
+init_firebase()   
+warmup_ai_model() 
 
+# ========================================================
+# HÀM HỖ TRỢ XỬ LÝ POP-UP IMGBB (ROLLBACK COMPONENT V1)
+# ========================================================
+def open_urls_in_new_tabs(urls):
+    """Mở tab mới bằng component.v1 kết hợp thời gian trễ"""
+    if isinstance(urls, str): 
+        urls = [urls]
+        
+    js_code = "".join([f"window.open('{u}', '_blank');" for u in urls if u and u.startswith("http")])
+    
+    if js_code:
+        import streamlit.components.v1 as components
+        # Gọi Component V1 và ép height=0 để nó tàng hình trên giao diện
+        components.html(f"<script>{js_code}</script>", height=0)
 
-# Mục tiêu đề cho Website
 st.set_page_config(page_title="Hệ thống Cửa thông minh AIoT", layout="wide")
 
-# Đọc file css
 with open("source/style.css", "r", encoding="utf-8") as f:
     custom_css = f.read()
 st.markdown(f"<style>{custom_css}</style>", unsafe_allow_html=True)
 
+# Khởi tạo Session State
+if "logged_in" not in st.session_state: st.session_state.logged_in = False
+if "show_change_pw" not in st.session_state: st.session_state.show_change_pw = False
+if "main_password" not in st.session_state: st.session_state.main_password = "123456"
+if "door_locked" not in st.session_state: st.session_state.door_locked = True
+if "light_mode" not in st.session_state: st.session_state.light_mode = "Auto"
+if "light_on" not in st.session_state: st.session_state.light_on = False
+if "telebot_mode" not in st.session_state: st.session_state.telebot_mode = "Tắt"
 
-
-
-# Các biến lưu trong server data
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-
-if "show_change_pw" not in st.session_state:
-    st.session_state.show_change_pw = False
-
-if "main_password" not in st.session_state:
-    st.session_state.main_password = "123456"
-
-if "door_locked" not in st.session_state:
-    st.session_state.door_locked = True
-
-if "light_mode" not in st.session_state:
-    st.session_state.light_mode = "Auto"
-
-if "light_on" not in st.session_state:
-    st.session_state.light_on = False
-
-if "telebot_mode" not in st.session_state:
-    st.session_state.telebot_mode = "Tắt"
-
-
-
-
+# ========================================================
 # --- CÁC HOẠT ĐỘNG NGẰM TRONG TRANG WEB ---
-Req = get_new_requests()
-if (Req):
-    # Checking object Face (using function here)
-    if (Req):
-        # Open first security level 
-        # Store history opening door information
-        # . . . .
-        print("hihihaha")
+# ========================================================
+if st.session_state.get("auto_sync", True):
+    st_autorefresh(interval=10000, key="auto_check_new_request")
 
-    else:
-        # Store history security information
+registered_db, is_mock_db, JSON_PATH = load_registered_db()
 
-        # Use telebot to send warning
-        if (st.session_state.telebot_mode == "Bật"):
-            send_telegram_alert(0, "Temporary message")
+try: new_requests = get_new_requests()
+except Exception: new_requests = {}
+
+if isinstance(new_requests, dict) and new_requests:
+    for req_id, req_data in new_requests.items():
+        if isinstance(req_data, dict) and req_data.get("status") == "pending":
+            img_url = req_data.get("image_url")
+            del_url = req_data.get("delete_img_url", "")
+            req_time = req_data.get("timestamp", int(time.time()))
+            time_str = datetime.fromtimestamp(req_time).strftime("%Y-%m-%d %H:%M:%S") if isinstance(req_time, (int, float)) else str(req_time)
+
+            if img_url:
+                opencv_img, fetch_err = fetch_image_from_url(img_url)
+                if opencv_img is not None:
+                    has_samples = any(udata.get("samples") for udata in registered_db.values() if isinstance(udata, dict)) if isinstance(registered_db, dict) else False
+                    log_id = f"log_{req_time}"
+
+                    # TH1: CSDL Trống
+                    if not has_samples:
+                        st.toast("🚨 CẢNH BÁO: CSDL trống! Không thể nhận diện (Người lạ)", icon="⚠️")
+                        add_history_log(log_id, {
+                            "timestamp": time_str, "person_name": "Người lạ", 
+                            "action": "Từ chối mở cửa (CSDL chưa có dữ liệu)", "image_url": img_url, "delete_img_url": del_url
+                        })
+                        if st.session_state.telebot_mode == "Bật":
+                            try: send_telegram_alert(f"🚨 CẢNH BÁO NGƯỜI LẠ!\nThời gian: {time_str}\n⚠️ Kho dữ liệu CSDL hiện tại đang trống!\nẢnh: {img_url}")
+                            except Exception: pass
+                        delete_processed_request(req_id)
+                        # LOẠI BỎ st.rerun() Ở ĐÂY ĐỂ TRÁNH GIÁN ĐOẠN UX
+                        
+                    # TH2: Có CSDL
+                    else:
+                        embedding, bbox, err = get_face_embedding(opencv_img)
+                        if not err and embedding is not None:
+                            best_name, min_dist, similarity, _ = find_best_match(embedding, registered_db)
+                            
+                            if "Người lạ" not in best_name:
+                                st.session_state.door_locked = False
+                                st.toast(f"🔓 Đã mở cửa cho: {best_name} ({similarity:.1f}%)")
+                                add_history_log(log_id, {
+                                    "timestamp": time_str, "person_name": best_name, 
+                                    "action": f"Mở cửa thành công ({similarity:.1f}%)", "image_url": img_url, "delete_img_url": del_url
+                                })
+                                delete_processed_request(req_id)
+                            else:
+                                st.toast("🚨 CẢNH BÁO: Phát hiện người lạ trước cửa!", icon="⚠️")
+                                add_history_log(log_id, {
+                                    "timestamp": time_str, "person_name": "Người lạ", 
+                                    "action": "Từ chối mở cửa", "image_url": img_url, "delete_img_url": del_url
+                                })
+                                if st.session_state.telebot_mode == "Bật":
+                                    try: send_telegram_alert(f"🚨 CẢNH BÁO NGƯỜI LẠ!\nThời gian: {time_str}\nPhát hiện người lạ trước cửa.\nẢnh: {img_url}")
+                                    except Exception: pass
+                                delete_processed_request(req_id)
 
     
 
@@ -123,6 +159,15 @@ else:
             st.session_state.show_change_pw = False 
             st.rerun()
 
+        st.write("---")
+        st.markdown("### ⚙️ Hệ thống ngầm")
+        # Công tắc bật/tắt quét tự động. Lưu vào session_state để nhớ trạng thái.
+        st.session_state.auto_sync = st.toggle(
+            "🔄 Quét khuôn mặt tự động", 
+            value=True, 
+            help="Tắt tạm thời khi bạn cần tải ảnh/nhập liệu để web không bị load lại giữa chừng."
+        )
+
     # Nếu trạng thái show_change_pw là True, hiển thị Form nhập mật khẩu mới ngay bên dưới sidebar hoặc ở góc phù hợp
     if st.session_state.show_change_pw:
         with st.sidebar:
@@ -151,16 +196,16 @@ else:
 
 
 
-    # Tiêu đề chính của Web Dashboard
+# Tiêu đề chính của Web Dashboard
     st.title("Hệ thống Cửa thông minh AIoT")
-    st.write("---") # Đường gạch ngang phân chia
+    st.write("---") 
 
-    # Khởi tạo 3 Tabs theo đúng ý tưởng mới của bạn
-    tab_control, tab_history, tab_database = st.tabs([
-        "📊 Bảng điều khiển trung tâm", 
+    tab_control, tab_mock_esp, tab_history, tab_database = st.tabs([
+        "📊 Bảng điều khiển", 
+        "📷 Giả lập chụp ảnh ESP32", 
         "📜 Lịch sử ra vào", 
         "👥 Quản lý kho dữ liệu Face"
-    ], key="Tab-Selection")
+    ])
 
 
 
@@ -197,7 +242,7 @@ else:
                     """, unsafe_allow_html=True
                 )
                 st.write("")
-                if st.button("🔓 Click để mở cửa từ xa", type="primary", use_container_width=True):
+                if st.button("🔓 Click để mở cửa từ xa", type="primary", width='stretch'):
                     st.session_state.door_locked = False
                     st.toast("⚡ Lệnh mở cửa đã được gửi đến thiết bị!")
                     time.sleep(0.5)
@@ -212,7 +257,7 @@ else:
                     """, unsafe_allow_html=True
                 )
                 st.write("")
-                if st.button("🔒 Click để khóa cửa lại", type="secondary", use_container_width=True):
+                if st.button("🔒 Click để khóa cửa lại", type="secondary", width='stretch'):
                     st.session_state.door_locked = True
                     st.toast("⚡ Lệnh khóa cửa đã được gửi đến thiết bị!")
                     time.sleep(0.5)
@@ -273,11 +318,57 @@ else:
         
 
 
+    # ----------------------------------------------------
+    # TAB 2: DEV TEST NEW REQ 
+    # ----------------------------------------------------
+
+    with tab_mock_esp:
+        st.markdown("<h2 style='text-align: left;'>📷 Test gửi ảnh lên Firebase (Giả lập ESP32-CAM)</h2>", unsafe_allow_html=True)
+        st.write("")
+        
+        esp_file = st.file_uploader("Tải ảnh quét khuôn mặt:", type=["jpg", "jpeg", "png"])
+        
+        if st.button("🚀 Mô phỏng gửi từ ESP32", type="primary"):
+            if esp_file is not None:
+                with st.spinner("Đang up ảnh lên ImgBB & gửi new req vào Firebase..."):
+                    import base64
+                    import requests
+                    
+                    # 1. API Gửi ảnh lên ImgBB
+                    IMGBB_API_KEY = st.secrets["imgbb"]["api_key"]
+                    encoded_img = base64.b64encode(esp_file.read()).decode('utf-8')
+                    
+                    payload = {
+                        "key": IMGBB_API_KEY,
+                        "image": encoded_img
+                    }
+                    res = requests.post("https://api.imgbb.com/1/upload", data=payload)
+                    
+                    if res.status_code == 200:
+                        data = res.json()["data"]
+                        img_url = data["url"]
+                        delete_url = data["delete_url"]
+                        img_time = data["time"] # Timestamp chuẩn UNIX từ ImgBB
+                        
+                        st.success(f"✅ Ảnh đã lên ImgBB: {img_url}")
+                        st.image(img_url, width=250)
+                        
+                        # Truyền cả delete_url và img_time qua Firebase
+                        from firebase_manager import push_esp32_mock_request
+                        req_id = push_esp32_mock_request(img_url, delete_url, img_time)
+                        
+                        st.info(f"Đã tạo Request [{req_id}] trên Firebase.")
+                    else:
+                        st.error("Lỗi upload ImgBB!")
+            else:
+                st.warning("Bạn phải chọn ảnh trước!")
+
+
 
     # ----------------------------------------------------
-    # TAB 2: LỊCH SỬ RA VÀO
+    # TAB 3: LỊCH SỬ RA VÀO
     # ----------------------------------------------------
-    with tab_history:        
+    with tab_history:
         st.markdown("<h2 style='text-align: left;'>Nhật ký quét khuôn mặt</h2>", unsafe_allow_html=True)
     
 
@@ -288,6 +379,9 @@ else:
             st.error(f"Lỗi khi kết nối lấy dữ liệu: {e}")
             db_logs = {}
 
+        # Nếu Firebase trả về None hoặc không phải dict -> Gán thành dict rỗng {}
+        if not isinstance(db_logs, dict):
+            db_logs = {}
 
         # 2. CHUYỂN ĐỔI DICTIONARY THÀNH LIST ĐỂ PANDAS ĐỌC ĐƯỢC
         formatted_logs = []
@@ -296,9 +390,10 @@ else:
             formatted_logs.append({
                 "ID":         log_key,
                 "Thời gian":  log_val.get("timestamp", ""),
-                "Đối tượng":  log_val.get("person_name", ""),
+                "Nhân vật":  log_val.get("person_name", ""),
                 "Trạng thái": log_val.get("action", ""),
-                "Ảnh":        log_val.get("image_url", "")
+                "Ảnh":        log_val.get("image_url", ""),
+                "Delete_URL": log_val.get("delete_img_url", "")
             })
         df = pd.DataFrame(formatted_logs) # Tạo bảng Pandas DataFrame từ danh sách đã chuẩn hóa
         
@@ -306,7 +401,7 @@ else:
         # 3. HIỂN THỊ RA GIAO DIỆN NẾU CÓ DỮ LIỆU
         if not df.empty:
             # Chỉ lấy các cột cần hiển thị trên bảng chính cho người dùng nhìn thấy
-            view_df = df[["Thời gian", "Đối tượng", "Trạng thái"]]
+            view_df = df[["Thời gian", "Nhân vật", "Trạng thái"]]
             
             # CHIA BỐ CỤC: BẢNG BÊN TRÁI (70%), KHUNG ẢNH BÊN PHẢI (30%)
             col_table, col_preview = st.columns([7, 3], gap="large")
@@ -336,7 +431,7 @@ else:
                     # Hiển thị thẻ thông tin tóm tắt bên dưới ảnh
                     st.info(f"""
                     **Thông tin chi tiết:**
-                    * **Đối tượng:** {selected_data['Đối tượng']}
+                    * **Nhân vật:** {selected_data['Nhân vật']}
                     * **Thời gian:** {selected_data['Thời gian']}
                     * **Kết quả:**   {selected_data['Trạng thái']}
                     """)
@@ -353,7 +448,22 @@ else:
                         if os.path.exists(local_path):
                             st.image(local_path, caption=f"Ảnh local: {img_path_or_url}", width='stretch')
                         else:
-                            st.error(f"❌ Không tìm thấy file `{img_path_or_url}` trong thư mục `Face_History/`.")         
+                            st.error(f"❌ Không tìm thấy file `{img_path_or_url}` trong thư mục `Face_History/`.")
+
+                    # --- THÊM TÍNH NĂNG XÓA LOG & MỞ TAB XÓA ẢNH IMGBB ---
+                    st.write("") # Tạo khoảng trống
+                    if st.button("🗑️ Xóa nhật ký này", type="primary", width='stretch'):
+                        with st.spinner("Đang dọn dẹp dữ liệu..."):
+                            from firebase_manager import delete_history_log
+                            
+                            # 1. Xóa Log trên Firebase trước (Sạch dữ liệu hệ thống)
+                            delete_history_log(selected_data["ID"])
+                            if selected_data["Delete_URL"]:
+                                open_urls_in_new_tabs(selected_data["Delete_URL"])
+                                    
+                            time.sleep(1.5)
+                            st.rerun()
+
                 else:
                     # Trạng thái ban đầu khi người dùng mới vào tab và chưa bấm chọn dòng nào
                     st.markdown(
@@ -371,26 +481,22 @@ else:
 
 
     # ----------------------------------------------------
-    # TAB 3: QUẢN LÝ KHO DỮ LIỆU FACE
+    # TAB 4: QUẢN LÝ KHO DỮ LIỆU FACE
     # ----------------------------------------------------
     with tab_database:
         st.markdown("<h2 style='text-align: left;'>Quản lý kho dữ liệu Face</h2>", unsafe_allow_html=True)
         
-        # 1. CẤU HÌNH THƯ MỤC LƯU TRỮ LOCAL
+        registered_db, is_mock_db, JSON_PATH = load_registered_db()
         DB_DIR = "./source/Face_Database"
-        JSON_PATH = os.path.join(DB_DIR, "registered_db.json")
-        os.makedirs(DB_DIR, exist_ok=True) # Tự động tạo thư mục Face_Database nếu chưa có
-        
 
-        # Tải dữ liệu bộ nhớ đặc trưng từ file JSON local lên hệ thống
-        if os.path.exists(JSON_PATH):
-            with open(JSON_PATH, "r", encoding="utf-8") as f:
-                registered_db = json.load(f)
+        # Hiển thị chế độ dữ liệu đang dùng
+        if is_mock_db:
+            st.caption("🟡 **Chế độ:** Local Mock (`registered_db.json`)")
         else:
-            registered_db = {}
+            st.caption("🟢 **Chế độ:** Firebase Realtime Database (`/registered`)")
             
 
-        # 2. CHIA GIAO DIỆN THÀNH 2 PHÂN VÙNG CHỨC NĂNG LỚN
+        # Chia giao diện thành 2 chức năng 
         db_action = st.segmented_control(
             "Chọn chức năng làm việc:", 
             options=["🔍 Kiểm tra nhận diện", "⚙️ Quản lý kho dữ liệu (Thêm / Xóa)"],
@@ -410,7 +516,6 @@ else:
             test_file = st.file_uploader("Chọn ảnh kiểm tra...", type=["jpg", "jpeg", "png"], key="test_face_upload")
             
             if test_file is not None:
-                # Chuyển đổi dữ liệu ảnh tải lên thành ma trận OpenCV
                 file_bytes = np.asarray(bytearray(test_file.read()), dtype=np.uint8)
                 opencv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
                 opencv_img = cv2.cvtColor(opencv_img, cv2.COLOR_BGR2RGB)
@@ -422,19 +527,43 @@ else:
                 with col_res:
                     st.markdown("#### ⚙️ Kết quả xử lý từ DeepFace:")
                     with st.spinner("Hệ thống AI đang trích xuất và đối sánh..."):
-                        # Gọi hàm trích xuất của bạn
                         embedding, bbox, err = get_face_embedding(opencv_img)
                         
                         if err:
                             st.error(f"❌ {err}")
                         else:
-                            # Gọi hàm đối sánh Cosine Distance của bạn
-                            name_result = find_best_match(embedding, registered_db)
+                            best_name, min_dist, similarity, match_details = find_best_match(embedding, registered_db)
                             
-                            if "Người lạ" in name_result:
-                                st.warning(f"🚨 Hệ thống cảnh báo: **{name_result}**")
+                            m_col1, m_col2 = st.columns(2)
+                            with m_col1:
+                                st.metric(
+                                    label="🎯 Độ tương đồng", 
+                                    value=f"{similarity:.1f}%",
+                                    delta="Đạt yêu cầu" if "Người lạ" not in best_name else "Dưới ngưỡng",
+                                    delta_color="normal" if "Người lạ" not in best_name else "inverse"
+                                )
+                            with m_col2:
+                                st.metric(
+                                    label="📏 Khoảng cách Cosine", 
+                                    value=f"{min_dist:.4f}",
+                                    help="Khoảng cách càng nhỏ (gần 0) thì khuôn mặt càng giống nhau."
+                                )
+
+                            st.progress(int(similarity) / 100)
+
+                            if "Người lạ" in best_name:
+                                st.warning(f"🚨 Kết quả: **{best_name}** (Không khớp với ai trong CSDL)")
                             else:
-                                st.success(f"✅ Xác thực thành công: **{name_result}**")
+                                st.success(f"✅ Xác thực thành công: **{best_name}**")
+
+                            st.write("---")
+                            
+                            with st.expander("📊 Xem bảng khoảng cách chi tiết với từng người", expanded=True):
+                                if match_details:
+                                    df_details = pd.DataFrame(match_details)
+                                    st.dataframe(df_details, width='stretch', hide_index=True)
+                                else:
+                                    st.info("Chưa có dữ liệu người quen trong CSDL.")
 
 
         # ====================================================
@@ -443,96 +572,221 @@ else:
         elif db_action == "⚙️ Quản lý kho dữ liệu (Thêm / Xóa)":
             col_add, col_list = st.columns([4, 6], gap="large")
             
-            # --- PHẦN THÊM DỮ LIỆU MỚI ---
+            # ----------------------------------------------------
+            # CỘT TRÁI: FORM THÊM NGƯỜI MỚI HOẶC ẢNH MỚI
+            # ----------------------------------------------------
             with col_add:
-                st.markdown("### ➕ Thêm người mới")
-                reg_name = st.text_input("Nhập họ và tên người đăng ký:", placeholder="Ví dụ: Nguyễn Văn A")
+                st.markdown("### ➕ Cập nhật CSDL")
+                
+                valid_user_keys = [
+                    uid for uid, udata in registered_db.items() 
+                    if isinstance(udata, dict) and "name" in udata
+                ]
+                
+                if not valid_user_keys:
+                    st.info("💡 Chưa có dữ liệu thành viên. Vui lòng đăng ký người mới!")
+                    add_mode = "Tạo người mới"
+                else:
+                    add_mode = st.radio(
+                        "Chế độ:", 
+                        ["Tạo người mới", "Thêm góc mặt cho người cũ"], 
+                        horizontal=True
+                    )
+                
+                target_uid = None
+                reg_name = ""
+                
+                if add_mode == "Tạo người mới":
+                    reg_name = st.text_input("Nhập họ và tên:", placeholder="Ví dụ: Nguyễn Văn A")
+                    target_uid = f"user_{int(time.time())}"
+                else:
+                    target_uid = st.selectbox(
+                        "Chọn người dùng cần thêm ảnh:",
+                        options=valid_user_keys,
+                        format_func=lambda x: f"{registered_db[x]['name']} ({len(registered_db[x].get('samples', {}))} ảnh)"
+                    )
+                    reg_name = registered_db[target_uid]["name"] if target_uid else ""
+
                 reg_file = st.file_uploader("Tải ảnh chân dung rõ mặt:", type=["jpg", "jpeg", "png"], key="reg_face_upload")
                 
-                if st.button("Đăng ký vào hệ thống", type="primary", width='stretch'):
+                if st.button("Lưu vào hệ thống", type="primary", width='stretch'):
                     if not reg_name.strip():
-                        st.error("Vui lòng không để trống tên người đăng ký!")
+                        st.error("Vui lòng nhập/chọn tên!")
                     elif reg_file is None:
-                        st.error("Vui lòng tải ảnh chân dung lên!")
+                        st.error("Vui lòng tải ảnh lên!")
                     else:
-                        # Đọc ảnh sang định dạng OpenCV
                         file_bytes = np.asarray(bytearray(reg_file.read()), dtype=np.uint8)
                         opencv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
                         opencv_img = cv2.cvtColor(opencv_img, cv2.COLOR_BGR2RGB)
                         
-                        with st.spinner("AI đang quét khuôn mặt mẫu..."):
+                        with st.spinner("AI đang quét khuôn mặt..."):
                             embedding, bbox, err = get_face_embedding(opencv_img)
                             
                             if err:
-                                st.error(f"Đăng ký thất bại: {err}")
+                                st.error(f"Thất bại: {err}")
                             else:
-                                # Loại bỏ ký tự đặc biệt trong tên để đặt tên file an toàn
+                                current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                 safe_filename = "".join([c for c in reg_name if c.isalnum() or c in (' ', '_', '-')]).strip()
-                                filename = f"{safe_filename}_{int(time.time())}.jpg"
-                                full_img_path = os.path.join(DB_DIR, filename)
+                                sample_id = f"sample_{int(time.time())}"
                                 
-                                # 1. Lưu file ảnh vật lý vào thư mục local Face_Database
-                                cv2.imwrite(full_img_path, opencv_img)
+                                sample_data = {"embedding": embedding}
+
+                                # NẾU LÀ LOCAL MOCK: Lưu file ảnh vào thư mục Face_Database
+                                if is_mock_db:
+                                    filename = f"{safe_filename}_{sample_id}.jpg"
+                                    full_img_path = os.path.join(DB_DIR, filename)
+                                    cv2.imwrite(full_img_path, cv2.cvtColor(opencv_img, cv2.COLOR_RGB2BGR))
+                                    sample_data["image_path"] = filename
+                                else:
+                                    # NẾU LÀ FIREBASE: Upload ảnh lên ImgBB lấy URL online
+                                    img_url, del_url = upload_to_imgbb(opencv_img)
+                                    if img_url:
+                                        sample_data["image_url"] = img_url
+                                        sample_data["delete_img_url"] = del_url
+                                    else:
+                                        st.error("Không thể upload ảnh lên ImgBB, vui lòng thử lại!")
+                                        st.stop()
                                 
-                                # 2. Cập nhật dữ liệu Vector vào dictionary
-                                uid = f"user_{int(time.time())}"
-                                registered_db[uid] = {
-                                    "name": reg_name,
-                                    "embedding": embedding,
-                                    "image_path": filename
-                                }
+                                # Cập nhật cấu trúc dict
+                                if target_uid not in registered_db or not isinstance(registered_db[target_uid], dict):
+                                    registered_db[target_uid] = {"name": reg_name, "samples": {}}
                                 
-                                # 3. Ghi đè cập nhật lại file JSON local
-                                with open(JSON_PATH, "w", encoding="utf-8") as f:
-                                    json.dump(registered_db, f, ensure_ascii=False, indent=4)
+                                registered_db[target_uid]["updated_at"] = current_time_str
+                                if "samples" not in registered_db[target_uid]:
+                                    registered_db[target_uid]["samples"] = {}
                                     
-                                st.success(f"🎉 Đã đăng ký thành công gương mặt cho: {reg_name}")
+                                registered_db[target_uid]["samples"][sample_id] = sample_data
+
+                                # Đồng bộ lưu lại
+                                save_registered_db(registered_db, is_mock_db, JSON_PATH)
+                                    
+                                st.success(f"🎉 Đã lưu thành công 1 góc mặt cho: {reg_name}")
                                 time.sleep(1)
                                 st.rerun()
                                 
-            # --- PHẦN DANH SÁCH & XÓA DỮ LIỆU ---
+            # ----------------------------------------------------
+            # CỘT PHẢI: XEM DANH SÁCH & BẤM VÀO ĐỂ HIỆN ẢNH XÓA
+            # ----------------------------------------------------
             with col_list:
-                st.markdown("### 📋 Danh sách người quen đã đăng ký")
+                st.markdown("### 📋 Kho ảnh đã đăng ký")
                 
-                if not registered_db:
-                    st.info("Hiện tại kho dữ liệu local đang trống.")
+                list_data = []
+                if isinstance(registered_db, dict):
+                    for uid, user_info in registered_db.items():
+                        if isinstance(user_info, dict):
+                            for sid, sinfo in user_info.get("samples", {}).items():
+                                if isinstance(sinfo, dict):
+                                    list_data.append({
+                                        "UID": uid,
+                                        "Mã Ảnh (SID)": sid,
+                                        "Tên thành viên": user_info.get("name", "N/A"),
+                                        "Cập nhật lúc": user_info.get("updated_at", "Chưa rõ"),
+                                        "Tên file ảnh": sinfo.get("image_path", ""),
+                                        "URL Ảnh": sinfo.get("image_url", ""),
+                                        "URL Xóa Ảnh": sinfo.get("delete_img_url", "")
+                                    })
+                
+                if not list_data:
+                    st.info("Hiện tại kho dữ liệu đang trống.")
                 else:
-                    # Chuyển đổi sang bảng DataFrame để hiển thị danh sách trực quan
-                    list_data = []
-                    for uid, data in registered_db.items():
-                        list_data.append({
-                            "Mã định danh": uid,
-                            "Tên thành viên": data.get("name"),
-                            "Tên file ảnh": data.get("image_path")
-                        })
                     df_db = pd.DataFrame(list_data)
-                    st.dataframe(df_db[["Tên thành viên", "Tên file ảnh"]], width='stretch', hide_index=True)
+                    view_df = df_db[["Tên thành viên", "Mã Ảnh (SID)", "Cập nhật lúc"]]
                     
-                    st.markdown("---")
-                    st.markdown("### 🗑️ Xóa thành viên khỏi hệ thống")
-                    
-                    # Hộp chọn đối tượng cần xóa
-                    delete_uid = st.selectbox(
-                        "Chọn người muốn xóa dữ liệu:",
-                        options=list(registered_db.keys()),
-                        format_func=lambda x: registered_db[x]["name"]
+                    st.write("💡 *Nhấp chọn một dòng để xem ảnh và thao tác xóa:*")
+                    selection = st.dataframe(
+                        view_df, 
+                        width='stretch', 
+                        hide_index=True,
+                        on_select="rerun",
+                        selection_mode="single-row"
                     )
                     
-                    if st.button("Xác nhận xóa hoàn toàn", type="secondary", width='stretch'):
-                        # 1. Tìm và xóa file ảnh vật lý trong thư mục Face_Database trên ổ cứng
-                        file_to_delete = registered_db[delete_uid].get("image_path")
-                        if file_to_delete:
-                            full_del_path = os.path.join(DB_DIR, file_to_delete)
-                            if os.path.exists(full_del_path):
-                                os.remove(full_del_path)
-                                
-                        # 2. Xóa thông tin và Vector trong cấu hình Dictionary
-                        del registered_db[delete_uid]
+                    selected_rows = selection.get("selection", {}).get("rows", [])
+                    if selected_rows:
+                        row_index = selected_rows[0]
+                        selected_data = df_db.iloc[row_index]
                         
-                        # 3. Lưu lại file JSON sau khi xóa
-                        with open(JSON_PATH, "w", encoding="utf-8") as f:
-                            json.dump(registered_db, f, ensure_ascii=False, indent=4)
+                        del_uid = selected_data["UID"]
+                        del_sid = selected_data["Mã Ảnh (SID)"]
+                        del_filename = selected_data["Tên file ảnh"]
+                        del_url = selected_data["URL Ảnh"]
+                        del_imgbb_url = selected_data["URL Xóa Ảnh"]
+                        del_name = selected_data["Tên thành viên"]
+                        
+                        st.markdown("---")
+                        col_img_preview, col_action = st.columns([1, 1], gap="medium")
+                        
+                        # HIỂN THỊ ẢNH
+                        with col_img_preview:
+                            if del_url and del_url.startswith("http"):
+                                st.image(del_url, caption=f"Mẫu: {del_sid}", width='stretch')
+                            elif del_filename:
+                                img_path = os.path.join(DB_DIR, del_filename)
+                                if os.path.exists(img_path):
+                                    st.image(img_path, caption=f"Mẫu: {del_sid}", width='stretch')
+                                else:
+                                    st.error(f"Không tìm thấy file ảnh: {del_filename}")
+                            else:
+                                st.warning("Không có hình ảnh hiển thị.")
+                                
+                        # CÁC NÚT XÓA
+                        with col_action:
+                            st.markdown(f"**Nhân vật:** {del_name}")
+                            st.write("")
                             
-                        st.success("Đã xóa bỏ dữ liệu thành công!")
-                        time.sleep(1)
-                        st.rerun()
+                            # XÓA 1 ẢNH
+                            if st.button("🗑️ Chỉ xóa ảnh này", type="primary", width='stretch'):
+                                # import streamlit.components.v1 as components
+                                
+                                # Xóa file local nếu có
+                                if del_filename:
+                                    p = os.path.join(DB_DIR, del_filename)
+                                    if os.path.exists(p): os.remove(p)
+                                
+                                # Nếu có link hủy ImgBB -> Bật tab mới cho người dùng bấm xóa
+                                if del_imgbb_url and del_imgbb_url.startswith("http"):
+                                    open_urls_in_new_tabs(del_imgbb_url)
+                                
+                                if del_sid in registered_db[del_uid]["samples"]:
+                                    del registered_db[del_uid]["samples"][del_sid]
+                                
+                                if not registered_db[del_uid]["samples"]:
+                                    del registered_db[del_uid]
+                                
+                                save_registered_db(registered_db, is_mock_db, JSON_PATH)
+                                st.success("Đã xóa dữ liệu thành công!")
+                                time.sleep(1.5)
+                                st.rerun()
+                                
+                            st.write("")
+                            
+                            # XÓA TOÀN BỘ NGƯỜI
+                            if st.button("🚨 Xóa toàn bộ người này", type="secondary", width='stretch'):
+                                import streamlit.components.v1 as components
+                                
+                                del_urls = []
+                                # 1. Duyệt qua tất cả ảnh mẫu của người này
+                                for sid, sinfo in registered_db[del_uid].get("samples", {}).items():
+                                    # Xóa file vật lý local (nếu chạy mode Local)
+                                    f_name = sinfo.get("image_path")
+                                    if f_name:
+                                        p = os.path.join(DB_DIR, f_name)
+                                        if os.path.exists(p): 
+                                            os.remove(p)
+                                            
+                                    # Gom link xóa ImgBB (nếu chạy mode Firebase)
+                                    d_url = sinfo.get("delete_img_url")
+                                    if d_url and d_url.startswith("http"):
+                                        del_urls.append(d_url)
+                                
+                                # 2. Bật Tab mới cho tất cả các link xóa ảnh ImgBB của người này
+                                if del_urls:
+                                    open_urls_in_new_tabs(del_urls)
+                                
+                                # 3. Xóa hoàn toàn user khỏi Database
+                                del registered_db[del_uid]
+                                save_registered_db(registered_db, is_mock_db, JSON_PATH)
+                                
+                                st.success(f"🎉 Đã xóa toàn bộ hồ sơ của {del_name}!")
+                                time.sleep(1.5)
+                                st.rerun()

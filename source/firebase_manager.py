@@ -1,124 +1,154 @@
-# import firebase_admin
-# from firebase_admin import credentials, db
-# import streamlit as st
-
-# @st.cache_resource
-# def init_firebase():
-#     """Khởi tạo Firebase an toàn. Trả về (Trạng thái, Lời nhắn)"""
-#     try:
-#         # Nếu chưa có app nào được khởi tạo
-#         if not firebase_admin._apps:
-#             # Kiểm tra xem có cấu hình trong secrets chưa
-#             if "firebase" not in st.secrets:
-#                 return False, "Chưa tìm thấy cấu hình [firebase] trong secrets.toml"
-                
-#             cred_dict = dict(st.secrets["firebase"])
-#             db_url = cred_dict.pop("database_url", None)
-            
-#             if not db_url:
-#                 return False, "Thiếu database_url trong cấu hình."
-                
-#             # Xử lý an toàn chuỗi private_key
-#             if "\\n" in cred_dict["private_key"]:
-#                 cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
-                
-#             cred = credentials.Certificate(cred_dict)
-#             firebase_admin.initialize_app(cred, {'databaseURL': db_url})
-            
-#         return True, "✅ Kết nối Firebase thành công!"
-#     except Exception as e:
-#         return False, f"❌ Lỗi khởi tạo Firebase: {str(e)}"
-
-# def get_new_requests():
-#     try:
-#         return db.reference('new_request').get()
-#     except Exception as e:
-#         st.toast(f"Lỗi đọc yêu cầu: {e}")
-#         return None
-
-# def get_history_logs():
-#     try:
-#         return db.reference('history_log').get()
-#     except Exception as e:
-#         st.toast(f"Lỗi đọc lịch sử: {e}")
-#         return None
-
-# def update_request_status(req_id, status):
-#     db.reference('new_request').child(req_id).update({'status': status})
-
-# def add_history_log(log_data):
-#     db.reference('history_log').push(log_data)
-
-# def get_registered_faces():
-#     """Lấy danh sách vector đặc trưng từ Firebase (Load 1 lần mỗi chu kỳ kiểm tra)"""
-#     return db.reference('registered').get()
-
-# def register_new_face(name, embedding):
-#     """Lưu vector khuôn mặt lên Firebase"""
-#     db.reference('registered').push({
-#         'name': name,
-#         'embedding': embedding
-#     })
-
-
+import firebase_admin
+from firebase_admin import credentials, db
 import streamlit as st
 import time
+import os
+import json
+import base64
+import numpy as np
+import cv2
+import requests
 
-# CHẾ ĐỘ GIẢ LẬP (MOCK MODE)
-# Không cần import firebase_admin hay credentials
+def is_mock(flag_name):
+    """Hàm kiểm tra flag trong secrets.toml"""
+    return "dev" in st.secrets and st.secrets["dev"].get(flag_name, False)
 
 @st.cache_resource
 def init_firebase():
-    """Giả lập khởi tạo Firebase an toàn. Trả về (Trạng thái, Lời nhắn)"""
-    return True, "⚠️ Đang chạy ở chế độ MÔ PHỎNG (Mock Mode) - Không cần Key Firebase!"
+    """Khởi tạo kết nối tới Firebase Realtime Database"""
+    if not firebase_admin._apps:
+        try:
+            fb_config = dict(st.secrets["firebase"])
+            db_url = fb_config.get("database_url") or fb_config.get("databaseURL")
+            if not db_url or "your-database-name" in db_url:
+                st.error("❌ Cảnh báo: Chưa cấu hình đúng `database_url` trong file .streamlit/secrets.toml!")
+                return
+            cred = credentials.Certificate(fb_config)
+            firebase_admin.initialize_app(cred, {'databaseURL': db_url})
+        except Exception as e:
+            st.error(f"Lỗi khi khởi tạo Firebase: {e}")
 
+# ==========================================
+# CÁC HÀM XỬ LÝ NEW REQUEST & HISTORY LOG
+# ==========================================
 def get_new_requests():
-    """
-    Giả lập lấy yêu cầu mở cửa. 
-    Trả về None để tab 1 (Engine) ở trạng thái chờ, không bị văng lỗi tải ảnh.
-    """
-    return None
+    return db.reference('new_request').get()
 
 def get_history_logs():
-    """
-    Bơm dữ liệu giả để Tab 2 (Dashboard) có bảng thống kê hiển thị ngay lập tức.
-    """
-    return {
-        "mock_log_001": {
-            "timestamp": "2026-07-16 08:30:00",
-            "image_url": "./source/Face_History/cat.png",
-            "person_name": "Tiến Lưu (Gay)",
-            "action": "Mở cửa thành công",
-            "bbox": {"x": 50, "y": 50, "w": 100, "h": 100}
-        },
-        "mock_log_002": {
-            "timestamp": "2026-07-16 09:15:22",
-            "image_url": "./source/Face_History/Imposter.png",
-            "person_name": "Người lạ",
-            "action": "Từ chối mở cửa",
-            "bbox": {"x": 60, "y": 40, "w": 90, "h": 110}
+    if is_mock("mock_history"):
+        return {
+            "mock_log_001": {
+                "timestamp": "2026-07-16 08:30:00",
+                "image_url": "https://i.ibb.co/sdXDdqBt/capture.jpg",
+                "person_name": "Tiến Lưu (Mock)",
+                "action": "Mở cửa thành công",
+            }
         }
-    }
+    return db.reference('history_log').get()
 
-def update_request_status(req_id, status):
-    """Giả lập cập nhật trạng thái (Bỏ qua vì không có Database thật)"""
-    pass
+def delete_processed_request(req_id):
+    """Xóa request khỏi nhánh chờ sau khi đã xử lý và lưu vào lịch sử"""
+    if not is_mock("mock_database"):
+        db.reference('new_request').child(req_id).delete()
 
-def add_history_log(log_data):
-    """Giả lập thêm lịch sử (Bỏ qua vì không có Database thật)"""
-    pass
+def add_history_log(log_id, log_data):
+    """Lưu lịch sử với một ID tùy chọn"""
+    if not is_mock("mock_database"):
+        db.reference('history_log').child(log_id).set(log_data)
 
-def get_registered_faces():
-    """
-    Lấy danh sách vector đặc trưng. 
-    Trả về dictionary rỗng để hàm AI không bị lỗi khi so sánh.
-    """
-    return {}
+def push_esp32_mock_request(image_url, delete_url, img_time):
+    """Giả lập ESP32 đẩy link ảnh lên Firebase nhánh chờ duyệt"""
+    if not is_mock("mock_database"):
+        req_id = f"req_{img_time}" 
+        db.reference('new_request').child(req_id).set({
+            'image_url': image_url,
+            'delete_img_url': delete_url,
+            'timestamp': img_time,
+            'status': 'pending'
+        })
+        return req_id
+    return None
 
-def register_new_face(name, embedding):
-    """
-    Giả lập lưu vector khuôn mặt lên Firebase.
-    Sử dụng time.sleep để tạo cảm giác "đang tải lên mạng" giống thật.
-    """
-    time.sleep(1.5)
-    pass
+def delete_history_log(log_id):
+    if not is_mock("mock_database"):
+        try: db.reference('history_log').child(log_id).delete()
+        except Exception as e: st.error(f"Lỗi khi xóa log Firebase: {e}")
+
+# ==========================================
+# CÁC HÀM QUẢN LÝ KHO DỮ LIỆU & VECTOR
+# ==========================================
+def encode_vector(emb_list):
+    """Nén mảng float thành chuỗi Base64"""
+    return base64.b64encode(np.array(emb_list, dtype=np.float32).tobytes()).decode('utf-8')
+
+def decode_vector(b64_str):
+    """Giải mã chuỗi Base64 về lại mảng float"""
+    if isinstance(b64_str, list): return b64_str 
+    return np.frombuffer(base64.b64decode(b64_str), dtype=np.float32).tolist()
+
+def upload_to_imgbb(opencv_rgb_img):
+    """Upload ảnh trực tiếp lên ImgBB"""
+    _, buffer = cv2.imencode('.jpg', cv2.cvtColor(opencv_rgb_img, cv2.COLOR_RGB2BGR))
+    encoded_img = base64.b64encode(buffer).decode('utf-8')
+    api_key = st.secrets["imgbb"]["api_key"]
+    res = requests.post("https://api.imgbb.com/1/upload", data={"key": api_key, "image": encoded_img})
+    if res.status_code == 200:
+        data = res.json()["data"]
+        return data["url"], data["delete_url"]
+    return None, None
+
+def save_registered_db(reg_db, is_mock_db, json_path):
+    """Đồng bộ dữ liệu xuống Local JSON hoặc Firebase"""
+    db_to_save = {}
+    for uid, user_data in reg_db.items():
+        if not isinstance(user_data, dict): continue
+        db_to_save[uid] = {
+            "name": user_data.get("name", ""),
+            "updated_at": user_data.get("updated_at", ""),
+            "samples": {}
+        }
+        for sid, sdata in user_data.get("samples", {}).items():
+            if not isinstance(sdata, dict): continue
+            emb = sdata.get("embedding")
+            encoded_emb = encode_vector(emb) if isinstance(emb, (list, np.ndarray)) else emb
+            
+            sample_dict = {"embedding": encoded_emb}
+            if "image_path" in sdata: sample_dict["image_path"] = sdata["image_path"]
+            if "image_url" in sdata: sample_dict["image_url"] = sdata["image_url"]
+            if "delete_img_url" in sdata: sample_dict["delete_img_url"] = sdata["delete_img_url"]
+            db_to_save[uid]["samples"][sid] = sample_dict
+
+    if is_mock_db:
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(db_to_save, f, ensure_ascii=False, indent=4)
+    else:
+        ref = db.reference("registered")
+        if db_to_save: ref.set(db_to_save)
+        else: ref.delete() 
+
+def load_registered_db():
+    """Tải và giải mã Base64 vector từ Local JSON hoặc Firebase"""
+    is_mock_db = is_mock("mock_database")
+    DB_DIR = "./source/Face_Database"
+    JSON_PATH = os.path.join(DB_DIR, "registered_db.json")
+    os.makedirs(DB_DIR, exist_ok=True)
+    
+    if is_mock_db:
+        if os.path.exists(JSON_PATH):
+            try:
+                with open(JSON_PATH, "r", encoding="utf-8") as f: db_data = json.load(f)
+            except Exception: db_data = {}
+        else: db_data = {}
+    else:
+        try: db_data = db.reference("registered").get() or {}
+        except Exception: db_data = {}
+
+    if not isinstance(db_data, dict): db_data = {}
+
+    for uid, user_data in db_data.items():
+        if isinstance(user_data, dict) and "samples" in user_data:
+            for sid, sample_data in user_data["samples"].items():
+                if isinstance(sample_data, dict) and "embedding" in sample_data:
+                    sample_data["embedding"] = decode_vector(sample_data["embedding"])
+                    
+    return db_data, is_mock_db, JSON_PATH

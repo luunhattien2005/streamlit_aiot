@@ -18,6 +18,8 @@ def fetch_image_from_url(url):
 
 def get_face_embedding(img):
     """Trích xuất mảng vector đặc trưng và tọa độ khuôn mặt"""
+    if img is None or img.size == 0:
+        return None, None, "Ảnh tải lên không hợp lệ hoặc bị rỗng!"
     try:
         ### Lấy representation (vector) thay vì tự so sánh
         #Mô hình VGG-Face
@@ -56,7 +58,7 @@ def calculate_cosine_distance(source_emb, test_emb):
 
 
 
-def find_best_match(target_embedding, registered_db):
+def find_best_match_old(target_embedding, registered_db):
     """So sánh Vector lấy được với Database đã đăng ký"""
     if not registered_db:
         return "Người lạ (Chưa có ai đăng ký)"
@@ -80,6 +82,49 @@ def find_best_match(target_embedding, registered_db):
                     
     return best_match_name
 
+def find_best_match(target_embedding, registered_db):
+    """
+    So sánh Vector lấy được với Database (Cấu trúc mới: 1 người có nhiều samples).
+    Trả về: (best_match_name, min_distance, max_similarity, match_details)
+    """
+    if not registered_db:
+        return "Người lạ (Chưa có dữ liệu)", 1.0, 0.0, []
+    
+    best_match_name = "Người lạ"
+    min_distance = float("inf")
+    VGG_FACE_THRESHOLD = 0.40
+    match_details = []
+
+    # Lặp qua từng người dùng
+    for uid, user_data in registered_db.items():
+        db_name = user_data.get("name", "Không tên")
+        samples = user_data.get("samples", {})
+        
+        # Lặp qua từng mẫu ảnh (góc mặt) của người đó
+        for sample_id, sample_data in samples.items():
+            db_embedding = sample_data.get("embedding")
+            
+            if db_embedding is not None:
+                distance = calculate_cosine_distance(target_embedding, db_embedding)
+                similarity = max(0.0, min(100.0, (1.0 - distance) * 100))
+                
+                match_details.append({
+                    "Tên thành viên": f"{db_name} ({sample_id})", # Hiển thị rõ tên khớp với góc ảnh nào
+                    "Khoảng cách Cosine": round(float(distance), 4),
+                    "Độ tương đồng (%)": round(float(similarity), 2)
+                })
+                
+                # Nếu khoảng cách này là nhỏ nhất từ trước tới giờ
+                if distance < min_distance:
+                    min_distance = distance
+                    # Nếu vượt qua ngưỡng tin cậy của VGG-Face
+                    if distance < VGG_FACE_THRESHOLD:
+                        best_match_name = db_name # Vẫn trả về tên gốc để mở cửa
+
+    match_details = sorted(match_details, key=lambda x: x["Khoảng cách Cosine"])
+    best_similarity = max(0.0, min(100.0, (1.0 - min_distance) * 100)) if min_distance != float("inf") else 0.0
+
+    return best_match_name, min_distance, best_similarity, match_details
 
 
 @st.cache_resource
