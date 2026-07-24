@@ -8,6 +8,11 @@ import cv2
 import numpy as np
 from streamlit_autorefresh import st_autorefresh
 
+from hardware_control import (
+    update_ai_status, remote_open_door, remote_lock_door, 
+    update_light_mode, change_keypad_password
+)
+
 from firebase_manager import (
     init_firebase, get_new_requests, get_history_logs, delete_processed_request, add_history_log,
     load_registered_db, save_registered_db, upload_to_imgbb
@@ -68,14 +73,18 @@ if isinstance(new_requests, dict) and new_requests:
             time_str = datetime.fromtimestamp(req_time).strftime("%Y-%m-%d %H:%M:%S") if isinstance(req_time, (int, float)) else str(req_time)
 
             if img_url:
+                update_ai_status("pending") # Báo mạch kêu 1 bíp ngắn
                 opencv_img, fetch_err = fetch_image_from_url(img_url)
+
                 if opencv_img is not None:
                     has_samples = any(udata.get("samples") for udata in registered_db.values() if isinstance(udata, dict)) if isinstance(registered_db, dict) else False
                     log_id = f"log_{req_time}"
 
                     # TH1: CSDL Trống
                     if not has_samples:
+                        update_ai_status("unknown") # CSDL trống -> Hú 5 tiếng
                         st.toast("🚨 CẢNH BÁO: CSDL trống! Không thể nhận diện (Người lạ)", icon="⚠️")
+                        
                         add_history_log(log_id, {
                             "timestamp": time_str, "person_name": "Người lạ", 
                             "action": "Từ chối mở cửa (CSDL chưa có dữ liệu)", "image_url": img_url, "delete_img_url": del_url
@@ -93,6 +102,7 @@ if isinstance(new_requests, dict) and new_requests:
                             best_name, min_dist, similarity, _ = find_best_match(embedding, registered_db)
                             
                             if "Người lạ" not in best_name:
+                                update_ai_status("known") # Người quen -> Kêu 2 bíp, mở cửa
                                 st.session_state.door_locked = False
                                 st.toast(f"🔓 Đã mở cửa cho: {best_name} ({similarity:.1f}%)")
                                 add_history_log(log_id, {
@@ -101,6 +111,7 @@ if isinstance(new_requests, dict) and new_requests:
                                 })
                                 delete_processed_request(req_id)
                             else:
+                                update_ai_status("unknown") # Người lạ -> Hú 5 tiếng
                                 st.toast("🚨 CẢNH BÁO: Phát hiện người lạ trước cửa!", icon="⚠️")
                                 add_history_log(log_id, {
                                     "timestamp": time_str, "person_name": "Người lạ", 
@@ -110,6 +121,8 @@ if isinstance(new_requests, dict) and new_requests:
                                     try: send_telegram_alert(f"🚨 CẢNH BÁO NGƯỜI LẠ!\nThời gian: {time_str}\nPhát hiện người lạ trước cửa.\nẢnh: {img_url}")
                                     except Exception: pass
                                 delete_processed_request(req_id)
+                time.sleep(2) 
+                update_ai_status("idle") # Trả hệ thống về trạng thái chờ
 
     
 
@@ -189,6 +202,7 @@ else:
                         st.error("Mật khẩu cũ không chính xác !!!")
                     else:
                         st.session_state.main_password = new_pw
+                        change_keypad_password(new_pw)
                         st.success("Đổi mật khẩu thành công !!!")
                         st.session_state.show_change_pw = False
                         st.rerun()
@@ -244,6 +258,7 @@ else:
                 st.write("")
                 if st.button("🔓 Click để mở cửa từ xa", type="primary", width='stretch'):
                     st.session_state.door_locked = False
+                    remote_open_door()
                     st.toast("⚡ Lệnh mở cửa đã được gửi đến thiết bị!")
                     time.sleep(0.5)
                     st.rerun()
@@ -259,6 +274,7 @@ else:
                 st.write("")
                 if st.button("🔒 Click để khóa cửa lại", type="secondary", width='stretch'):
                     st.session_state.door_locked = True
+                    remote_lock_door()
                     st.toast("⚡ Lệnh khóa cửa đã được gửi đến thiết bị!")
                     time.sleep(0.5)
                     st.rerun()
@@ -299,6 +315,7 @@ else:
             # Cập nhật cấu hình khi người dùng đổi chế độ trên giao diện
             if chosen_mode and chosen_mode != st.session_state.light_mode:
                 st.session_state.light_mode = chosen_mode
+                update_light_mode(chosen_mode)
                 st.toast(f"⚙️ Đã chuyển đèn sang chế độ: {chosen_mode}")
                 time.sleep(0.3)
                 st.rerun()
