@@ -284,38 +284,38 @@ else:
 
         # --- CỘT BÊN TRÁI: ĐIỀU KHIỂN CỬA RA VÀO VÀ PASS KEYPAD---
         with col_door:
-            st.markdown("### 🚪 Quản lý Cửa ra vào")
+            st.markdown("### 🚪 Quản lý Chốt cửa")
             
             if st.session_state.door_locked:
                 st.markdown(
                     """
                     <div style='background-color: #ffebe6; padding: 20px; border-radius: 10px; text-align: center; border-left: 6px solid #ff4d4f;'>
-                        <h4 style='color: #ff4d4f; margin: 0; font-size: 18px;'>🔒 TRẠNG THÁI: CỬA ĐANG KHÓA</h4>
-                        <p style='color: #666; margin: 5px 0 0 0; font-size: 13px;'>Hệ thống đang bảo vệ an toàn</p>
+                        <h4 style='color: #ff4d4f; margin: 0; font-size: 18px;'>🔒 TRẠNG THÁI: CHỐT ĐANG KHÓA</h4>
+                        <p style='color: #666; margin: 5px 0 0 0; font-size: 13px;'>Chốt điện tử đang khóa an toàn</p>
                     </div>
                     """, unsafe_allow_html=True
                 )
                 st.write("")
-                if st.button("🔓 Click để mở cửa từ xa", type="primary", width='stretch'):
+                if st.button("🔓 Click để mở chốt từ xa", type="primary", width='stretch'):
                     st.session_state.door_locked = False
                     remote_open_door()
-                    st.toast("⚡ Lệnh mở cửa đã được gửi đến thiết bị!")
+                    st.toast("⚡ Lệnh rút chốt đã được gửi đến thiết bị!")
                     time.sleep(0.5)
                     st.rerun()
             else:
                 st.markdown(
                     """
                     <div style='background-color: #e6f7ff; padding: 20px; border-radius: 10px; text-align: center; border-left: 6px solid #1890ff;'>
-                        <h4 style='color: #1890ff; margin: 0; font-size: 18px;'>🔓 TRẠNG THÁI: CỬA ĐANG MỞ</h4>
-                        <p style='color: #666; margin: 5px 0 0 0; font-size: 13px;'>Cửa đang mở, vui lòng chú ý</p>
+                        <h4 style='color: #1890ff; margin: 0; font-size: 18px;'>🔓 TRẠNG THÁI: CHỐT ĐANG MỞ</h4>
+                        <p style='color: #666; margin: 5px 0 0 0; font-size: 13px;'>Chốt đã rút, có thể đẩy cửa vào</p>
                     </div>
                     """, unsafe_allow_html=True
                 )
                 st.write("")
-                if st.button("🔒 Click để khóa cửa lại", type="secondary", width='stretch'):
+                if st.button("🔒 Click để đóng chốt lại", type="secondary", width='stretch'):
                     st.session_state.door_locked = True
                     remote_lock_door()
-                    st.toast("⚡ Lệnh khóa cửa đã được gửi đến thiết bị!")
+                    st.toast("⚡ Lệnh đóng chốt đã được gửi đến thiết bị!")
                     time.sleep(0.5)
                     st.rerun()
 
