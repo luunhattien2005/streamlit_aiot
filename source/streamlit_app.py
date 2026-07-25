@@ -48,10 +48,35 @@ st.markdown(f"<style>{custom_css}</style>", unsafe_allow_html=True)
 if "logged_in" not in st.session_state: st.session_state.logged_in = False
 if "show_change_pw" not in st.session_state: st.session_state.show_change_pw = False
 if "main_password" not in st.session_state: st.session_state.main_password = "123456"
-if "door_locked" not in st.session_state: st.session_state.door_locked = True
-if "light_mode" not in st.session_state: st.session_state.light_mode = "Auto"
-if "light_on" not in st.session_state: st.session_state.light_on = False
-if "telebot_mode" not in st.session_state: st.session_state.telebot_mode = "Tắt"
+# ĐỒNG BỘ VỚI DB
+if "sync_initial" not in st.session_state:
+    # 1. Khởi tạo mặc định dự phòng
+    st.session_state.door_locked = True
+    st.session_state.light_mode = "Auto"
+    st.session_state.light_on = False
+    st.session_state.telebot_mode = "Tắt"
+    
+    # 2. Chủ động móc vào Firebase để lấy trạng thái thật của thiết bị ngay khi tải trang
+    from firebase_manager import db, is_mock
+    if not is_mock("mock_database"):
+        try:
+            current_status = db.reference('device_control').get()
+            if current_status:
+                # Cập nhật trạng thái Cửa
+                door_val = current_status.get("door", {}).get("value")
+                if door_val == "open": 
+                    st.session_state.door_locked = False
+                
+                # Cập nhật trạng thái Đèn
+                light_val = current_status.get("light", {}).get("value")
+                mode_map_reverse = {"on": "Bật", "off": "Tắt", "auto": "Auto"}
+                if light_val in mode_map_reverse:
+                    st.session_state.light_mode = mode_map_reverse[light_val]
+                    st.session_state.light_on = (light_val == "on")
+        except Exception as e:
+            pass
+            
+    st.session_state.sync_initial = True
 
 # ========================================================
 # --- CÁC HOẠT ĐỘNG NGẰM TRONG TRANG WEB ---
