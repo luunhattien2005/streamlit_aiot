@@ -132,6 +132,11 @@ if isinstance(new_requests, dict) and new_requests:
                                     try: send_telegram_alert(f"🚨 CẢNH BÁO NGƯỜI LẠ!\nThời gian: {time_str}\nPhát hiện người lạ trước cửa.\nẢnh: {img_url}")
                                     except Exception: pass
                                 delete_processed_request(req_id)
+                        
+                        # BỔ SUNG ĐOẠN ELSE NÀY ĐỂ VÁ LỖI
+                        else:
+                            st.toast("⚠️ Ảnh lỗi hoặc không tìm thấy khuôn mặt, đã tự động hủy!", icon="🗑️")
+                            delete_processed_request(req_id) # Bắt buộc phải chém bỏ request rác
                 time.sleep(2) 
                 update_ai_status("idle") # Trả hệ thống về trạng thái chờ
 
