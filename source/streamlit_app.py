@@ -15,7 +15,7 @@ from hardware_control import (
 
 from firebase_manager import (
     init_firebase, get_new_requests, get_history_logs, delete_processed_request, add_history_log,
-    load_registered_db, save_registered_db, upload_to_imgbb
+    load_registered_db, save_registered_db, upload_to_imgbb, check_door_alert, clear_door_alert
 )
 from telegram_bot import send_telegram_alert
 from face_engine import (fetch_image_from_url, get_face_embedding, find_best_match, warmup_ai_model)
@@ -63,6 +63,17 @@ registered_db, is_mock_db, JSON_PATH = load_registered_db()
 
 try: new_requests = get_new_requests()
 except Exception: new_requests = {}
+
+# --- LOGIC XỬ LÝ CẢNH BÁO 180S ---
+door_alert = check_door_alert()
+if door_alert:
+    st.toast("🚨 CẢNH BÁO: Cửa mở liên tục quá 3 phút!", icon="⚠️")
+    if st.session_state.telebot_mode == "Bật":
+        try: 
+            send_telegram_alert(f"🚨 CẢNH BÁO AN NINH!\nThời gian: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n⚠️ Cửa phòng đã mở liên tục quá 3 phút mà chưa được đóng lại!")
+        except Exception: 
+            pass
+    clear_door_alert() # Dọn dẹp cờ cảnh báo trên Database sau khi xử lý xong
 
 if isinstance(new_requests, dict) and new_requests:
     for req_id, req_data in new_requests.items():
@@ -202,7 +213,6 @@ else:
                         st.error("Mật khẩu cũ không chính xác !!!")
                     else:
                         st.session_state.main_password = new_pw
-                        change_keypad_password(new_pw)
                         st.success("Đổi mật khẩu thành công !!!")
                         st.session_state.show_change_pw = False
                         st.rerun()
@@ -242,7 +252,7 @@ else:
         # 2. CHIA BỐ CỤC LAYOUT THÀNH 2 CỘT: CỬA (TRÁI) & ĐÈN (PHẢI)
         col_door, col_light = st.columns(2, gap="large")
 
-        # --- CỘT BÊN TRÁI: ĐIỀU KHIỂN CỬA RA VÀO ---
+        # --- CỘT BÊN TRÁI: ĐIỀU KHIỂN CỬA RA VÀO VÀ PASS KEYPAD---
         with col_door:
             st.markdown("### 🚪 Quản lý Cửa ra vào")
             
@@ -278,6 +288,18 @@ else:
                     st.toast("⚡ Lệnh khóa cửa đã được gửi đến thiết bị!")
                     time.sleep(0.5)
                     st.rerun()
+
+            # ... Code hiển thị trạng thái nút Mở/Khóa cửa cũ
+            st.write("---")
+            st.markdown("### 🔑 Đổi mật khẩu cửa (Keypad)")
+            with st.form("keypad_pw_form"):
+                new_kp_pw = st.text_input("Mật khẩu Keypad mới:", type="password", placeholder="Nhập số (VD: 789)...")
+                if st.form_submit_button("Cập nhật vào bộ nhớ mạch", width='stretch'):
+                    if new_kp_pw:
+                        change_keypad_password(new_kp_pw)
+                        st.success(f"Đã gửi lệnh đổi mật khẩu cửa thành công!")
+                    else:
+                        st.error("Vui lòng không để trống mật khẩu!")
 
         # --- CỘT BÊN PHẢI: ĐIỀU KHIỂN ĐÈN HỆ THỐNG ---
         with col_light:

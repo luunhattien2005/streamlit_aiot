@@ -34,4 +34,4 @@ def update_light_mode(mode):
 
 def change_keypad_password(new_password):
     """Cập nhật mật khẩu Keypad"""
-    send_firebase_command('new_password', new_password)
+    send_firebase_command('pass_keypad', new_password)

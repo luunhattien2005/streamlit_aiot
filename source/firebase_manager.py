@@ -74,6 +74,17 @@ def delete_history_log(log_id):
         try: db.reference('history_log').child(log_id).delete()
         except Exception as e: st.error(f"Lỗi khi xóa log Firebase: {e}")
 
+def check_door_alert():
+    """Kiểm tra cảnh báo cửa mở quá lâu từ ESP32"""
+    if not is_mock("mock_database"):
+        return db.reference('device_control/door_alert').get()
+    return None
+
+def clear_door_alert():
+    """Xóa trạng thái cảnh báo sau khi đã gửi Telegram"""
+    if not is_mock("mock_database"):
+        db.reference('device_control/door_alert').delete()
+
 # ==========================================
 # CÁC HÀM QUẢN LÝ KHO DỮ LIỆU & VECTOR
 # ==========================================
