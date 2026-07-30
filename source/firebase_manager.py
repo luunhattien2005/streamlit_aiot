@@ -29,6 +29,34 @@ def init_firebase():
             st.error(f"Lỗi khi khởi tạo Firebase: {e}")
 
 # ==========================================
+# CÁC HÀM QUẢN LÝ TÀI KHOẢN ADMIN
+# ==========================================
+def get_admin_credentials_from_db():
+    """Lấy cả Username và Password Admin từ Firebase"""
+    if not is_mock("mock_database"):
+        try:
+            data = db.reference('admin_settings').get()
+            if isinstance(data, dict):
+                return data.get("web_username"), data.get("web_password")
+        except Exception as e:
+            st.error(f"Lỗi khi đọc thông tin Admin từ Firebase: {e}")
+    return None, None
+
+def update_admin_credentials_in_db(new_username, new_password):
+    """Cập nhật cả Username và Password Admin mới lên Firebase"""
+    if not is_mock("mock_database"):
+        try:
+            db.reference('admin_settings').update({
+                'web_username': new_username,
+                'web_password': new_password
+            })
+            return True
+        except Exception as e:
+            st.error(f"Lỗi khi lưu thông tin Admin mới lên Firebase: {e}")
+            return False
+    return False
+
+# ==========================================
 # CÁC HÀM XỬ LÝ NEW REQUEST & HISTORY LOG
 # ==========================================
 def get_new_requests():

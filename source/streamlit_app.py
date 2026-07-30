@@ -15,7 +15,8 @@ from hardware_control import (
 
 from firebase_manager import (
     init_firebase, get_new_requests, get_history_logs, delete_processed_request, add_history_log,
-    load_registered_db, save_registered_db, upload_to_imgbb, check_door_alert, clear_door_alert
+    load_registered_db, save_registered_db, upload_to_imgbb, check_door_alert, clear_door_alert,
+    get_admin_credentials_from_db, update_admin_credentials_in_db, is_mock
 )
 from telegram_bot import send_telegram_alert
 from face_engine import (fetch_image_from_url, get_face_embedding, find_best_match, warmup_ai_model)
@@ -47,7 +48,27 @@ st.markdown(f"<style>{custom_css}</style>", unsafe_allow_html=True)
 # Khởi tạo Session State
 if "logged_in" not in st.session_state: st.session_state.logged_in = False
 if "show_change_pw" not in st.session_state: st.session_state.show_change_pw = False
-if "main_password" not in st.session_state: st.session_state.main_password = "123456"
+if "main_username" not in st.session_state or "main_password" not in st.session_state: 
+    # Lấy tài khoản/mật khẩu dự phòng từ file secrets.toml
+    secret_user = st.secrets.get("admin", {}).get("username", "admin")
+    secret_pw = st.secrets.get("admin", {}).get("password", "123456")
+    
+    if is_mock("mock_database"):
+        # Chế độ Dev (Mock): Ép dùng thông tin từ secrets
+        st.session_state.main_username = secret_user
+        st.session_state.main_password = secret_pw
+    else:
+        # Chế độ Prod: Tải thông tin từ Firebase
+        db_user, db_pw = get_admin_credentials_from_db()
+        if db_user and db_pw:
+            st.session_state.main_username = db_user
+            st.session_state.main_password = db_pw
+        else:
+            # Nếu trên Firebase chưa có, tự động tạo mới từ secret dự phòng
+            st.session_state.main_username = secret_user
+            st.session_state.main_password = secret_pw
+            update_admin_credentials_in_db(secret_user, secret_pw)
+
 # ĐỒNG BỘ VỚI DB
 if "sync_initial" not in st.session_state:
     # 1. Khởi tạo mặc định dự phòng
@@ -79,7 +100,7 @@ if "sync_initial" not in st.session_state:
     st.session_state.sync_initial = True
 
 # ========================================================
-# --- CÁC HOẠT ĐỘNG NGẰM TRONG TRANG WEB ---
+# CÁC HOẠT ĐỘNG NGẰM TRONG TRANG WEB 
 # ========================================================
 if st.session_state.get("auto_sync", True):
     st_autorefresh(interval=10000, key="auto_check_new_request")
@@ -129,7 +150,6 @@ if isinstance(new_requests, dict) and new_requests:
                             try: send_telegram_alert(f"🚨 CẢNH BÁO NGƯỜI LẠ!\nThời gian: {time_str}\n⚠️ Kho dữ liệu CSDL hiện tại đang trống!\nẢnh: {img_url}")
                             except Exception: pass
                         delete_processed_request(req_id)
-                        # LOẠI BỎ st.rerun() Ở ĐÂY ĐỂ TRÁNH GIÁN ĐOẠN UX
                         
                     # TH2: Có CSDL
                     else:
@@ -183,13 +203,13 @@ if not st.session_state.logged_in:
             username = st.text_input("Tài khoản admin", placeholder="Nhập tên tài khoản...")
             password = st.text_input("Mật khẩu", type="password", placeholder="Nhập mật khẩu...")
             submit_button = st.form_submit_button("Đăng nhập", width='stretch')
-            
+
             if submit_button:
-                # Tạm thời cài tài khoản cố định để bạn dễ chạy thử test giao diện
-                if username == "admin" and password == st.session_state.main_password:
+                # So sánh với tài khoản & mật khẩu đang lưu trong session_state
+                if username == st.session_state.main_username and password == st.session_state.main_password:
                     st.session_state.logged_in = True
                     st.success("Đăng nhập thành công!")
-                    st.rerun() # Khởi động lại trang để chuyển sang giao diện chính
+                    st.rerun()
                 else:
                     st.error("Sai tài khoản hoặc mật khẩu! Vui lòng thử lại.")
 
@@ -202,7 +222,7 @@ else:
     # Tạo thanh Sidebar bên cạnh để đặt nút Đăng xuất cho gọn   
     with st.sidebar:
         st.markdown("<h1 class='sidebar-title'>Cài đặt</h1>", unsafe_allow_html=True)
-        st.markdown("<h1 class='sidebar-admin'>Tài khoản: Admin</h1>", unsafe_allow_html=True)
+        st.markdown(f"<h1 class='sidebar-admin'>Tài khoản: {st.session_state.main_username}</h1>", unsafe_allow_html=True)
 
         if st.button("Thay đổi mật khẩu", type="primary", key="change-btn", width='stretch'):
             st.session_state.show_change_pw = not st.session_state.show_change_pw
@@ -225,29 +245,33 @@ else:
     # Nếu trạng thái show_change_pw là True, hiển thị Form nhập mật khẩu mới ngay bên dưới sidebar hoặc ở góc phù hợp
     if st.session_state.show_change_pw:
         with st.sidebar:
-            st.write("---") # Đường kẻ phân chia
-            with st.form("change_pw_form"):
-                st.markdown("<h1 class='title-change-pw'>Đổi mật khẩu</h1>", unsafe_allow_html=True)
-                old_pw = st.text_input("Mật khẩu cũ", type="password", placeholder="Nhập mật khẩu cũ...")
-                new_pw = st.text_input("Mật khẩu mới", type="password", placeholder="Nhập mật khẩu mới...")
-                confirm_pw = st.text_input("Xác nhận mật khẩu", type="password", placeholder="Nhập lại mật khẩu mới...")
-                
-                submit_change = st.form_submit_button("Xác nhận đổi", width='stretch')
-                if submit_change:
-                    # Kiểm tra logic đổi mật khẩu
-                    if (old_pw == "" or new_pw == "" or confirm_pw == ""):
-                        st.error("Vui lòng nhập đầy đủ các trường !!!")
-                    elif new_pw != confirm_pw:
-                        st.error("Mật khẩu mới không trùng khớp !!!")
-                    elif old_pw != st.session_state.main_password: 
-                        st.error("Mật khẩu cũ không chính xác !!!")
-                    else:
-                        st.session_state.main_password = new_pw
-                        st.success("Đổi mật khẩu thành công !!!")
-                        st.session_state.show_change_pw = False
-                        st.rerun()
-
-
+            st.write("---")
+            if is_mock("mock_database"):
+                st.warning("⚠️ Đang bật chế độ Mock Local. Tính năng đổi thông tin Web bị khóa!")
+            else:
+                with st.form("change_pw_form"):
+                    st.markdown("<h1 class='title-change-pw'>Đổi thông tin Admin</h1>", unsafe_allow_html=True)
+                    new_user = st.text_input("Tài khoản admin mới", value=st.session_state.main_username)
+                    old_pw = st.text_input("Mật khẩu cũ", type="password", placeholder="Nhập mật khẩu cũ...")
+                    new_pw = st.text_input("Mật khẩu mới", type="password", placeholder="Nhập mật khẩu mới...")
+                    confirm_pw = st.text_input("Xác nhận mật khẩu mới", type="password", placeholder="Nhập lại mật khẩu mới...")
+                    
+                    submit_change = st.form_submit_button("Xác nhận đổi", width='stretch')
+                    if submit_change:
+                        if not new_user.strip() or old_pw == "" or new_pw == "" or confirm_pw == "":
+                            st.error("Vui lòng nhập đầy đủ các trường !!!")
+                        elif new_pw != confirm_pw:
+                            st.error("Mật khẩu mới không trùng khớp !!!")
+                        elif old_pw != st.session_state.main_password: 
+                            st.error("Mật khẩu cũ không chính xác !!!")
+                        else:
+                            if update_admin_credentials_in_db(new_user.strip(), new_pw):
+                                st.session_state.main_username = new_user.strip()
+                                st.session_state.main_password = new_pw
+                                st.success("Đổi thông tin tài khoản thành công !!!")
+                                st.session_state.show_change_pw = False
+                                time.sleep(1)
+                                st.rerun()
 
 
 # Tiêu đề chính của Web Dashboard
