@@ -102,6 +102,21 @@ def delete_history_log(log_id):
         try: db.reference('history_log').child(log_id).delete()
         except Exception as e: st.error(f"Lỗi khi xóa log Firebase: {e}")
 
+def get_device_status():
+    """
+    Đọc trạng thái THẬT do chính ESP32 báo cáo (nhánh device_status, một chiều
+    thiết bị -> web). Web PHẢI đọc nhánh này để hiển thị đúng khi trạng thái
+    thay đổi do chính thiết bị gây ra (bấm mật khẩu bàn phím, cảm biến MC-38
+    tự khóa lại...), chứ không chỉ dựa vào lệnh web vừa gửi đi (device_control).
+    """
+    if not is_mock("mock_database"):
+        try:
+            return db.reference('device_status').get() or {}
+        except Exception as e:
+            st.error(f"Lỗi khi đọc trạng thái thiết bị: {e}")
+            return {}
+    return {}
+
 def check_door_alert():
     """Kiểm tra cảnh báo cửa mở quá lâu từ ESP32"""
     if not is_mock("mock_database"):

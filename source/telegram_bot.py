@@ -2,10 +2,12 @@ import requests
 import streamlit as st
 import logging
 
-def send_telegram_alert(image_url, message):
+def send_telegram_alert(message, image_url=None):
     """
-    Sends an alert message with a photo to Telegram.
-    Uses credentials from Streamlit secrets.
+    Gửi cảnh báo tới Telegram. Dùng credentials từ Streamlit secrets.
+    - Nếu có image_url -> gửi kèm ảnh (sendPhoto).
+    - Nếu KHÔNG có image_url (vd: cảnh báo cửa mở quá lâu, không có ảnh chụp)
+      -> gửi tin nhắn văn bản thuần (sendMessage) thay vì bắt buộc phải có ảnh.
     """
     try:
         # Check if secrets are configured
@@ -22,16 +24,23 @@ def send_telegram_alert(image_url, message):
             st.toast("⚠️ Không thể gửi cảnh báo Telegram (Cấu hình không đầy đủ)")
             return False
 
-        # Telegram SendPhoto API Endpoint
-        api_url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
-        
-        # Prepare payload
-        payload = {
-            "chat_id": chat_id,
-            "photo": image_url,
-            "caption": message,
-            "parse_mode": "Markdown"
-        }
+        if image_url:
+            # Có ảnh -> gửi kèm ảnh
+            api_url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
+            payload = {
+                "chat_id": chat_id,
+                "photo": image_url,
+                "caption": message,
+                "parse_mode": "Markdown"
+            }
+        else:
+            # Không có ảnh (vd: cảnh báo cửa mở quá 3 phút) -> gửi tin nhắn text thuần
+            api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            payload = {
+                "chat_id": chat_id,
+                "text": message,
+                "parse_mode": "Markdown"
+            }
         
         # Send request
         response = requests.post(api_url, data=payload)

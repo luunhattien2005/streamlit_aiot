@@ -16,7 +16,7 @@ from hardware_control import (
 from firebase_manager import (
     init_firebase, get_new_requests, get_history_logs, delete_processed_request, add_history_log,
     load_registered_db, save_registered_db, upload_to_imgbb, check_door_alert, clear_door_alert,
-    get_admin_credentials_from_db, update_admin_credentials_in_db, is_mock
+    get_admin_credentials_from_db, update_admin_credentials_in_db, get_device_status, is_mock
 )
 from telegram_bot import send_telegram_alert
 from face_engine import (fetch_image_from_url, get_face_embedding, find_best_match, warmup_ai_model)
@@ -71,33 +71,38 @@ if "main_username" not in st.session_state or "main_password" not in st.session_
 
 # ĐỒNG BỘ VỚI DB
 if "sync_initial" not in st.session_state:
-    # 1. Khởi tạo mặc định dự phòng
+    # Giá trị mặc định dự phòng, chỉ set 1 lần duy nhất lúc mới mở trang
+    # (trước khi lần đọc device_status đầu tiên bên dưới chạy)
     st.session_state.door_locked = True
     st.session_state.light_mode = "Auto"
     st.session_state.light_on = False
     st.session_state.telebot_mode = "Tắt"
-    
-    # 2. Chủ động móc vào Firebase để lấy trạng thái thật của thiết bị ngay khi tải trang
-    from firebase_manager import db, is_mock
-    if not is_mock("mock_database"):
-        try:
-            current_status = db.reference('device_control').get()
-            if current_status:
-                # Cập nhật trạng thái Cửa
-                door_val = current_status.get("door", {}).get("value")
-                if door_val == "open": 
-                    st.session_state.door_locked = False
-                
-                # Cập nhật trạng thái Đèn
-                light_val = current_status.get("light", {}).get("value")
-                mode_map_reverse = {"on": "Bật", "off": "Tắt", "auto": "Auto"}
-                if light_val in mode_map_reverse:
-                    st.session_state.light_mode = mode_map_reverse[light_val]
-                    st.session_state.light_on = (light_val == "on")
-        except Exception as e:
-            pass
-            
+    st.session_state.last_cmd_time = 0  # thời điểm web vừa gửi lệnh gần nhất
     st.session_state.sync_initial = True
+
+# --- LUÔN ĐỌC TRẠNG THÁI THẬT CỦA THIẾT BỊ MỖI LẦN SCRIPT CHẠY LẠI ---
+# (mỗi 10s do st_autorefresh, hoặc mỗi khi bấm nút -> st.rerun())
+# QUAN TRỌNG: đọc nhánh "device_status" (thiết bị tự báo cáo, 1 chiều) chứ
+# KHÔNG đọc "device_control" (chỉ là lệnh web đã gửi, không chắc thiết bị đã
+# thực thi hay chưa). Đây là nhánh phản ánh đúng thực tế phần cứng, kể cả khi
+# trạng thái đổi do chính thiết bị (bàn phím keypad, cảm biến cửa MC-38 tự
+# khóa lại khi đóng cửa vật lý...) chứ không phải do web ra lệnh.
+if not is_mock("mock_database"):
+    # Bỏ qua việc ghi đè trong 3 giây sau khi web vừa tự gửi lệnh, để tránh
+    # hiện tượng "nhấp nháy" quay lại trạng thái cũ trong lúc chờ ESP32 kịp
+    # xử lý và báo cáo trạng thái mới lên device_status.
+    if time.time() - st.session_state.get("last_cmd_time", 0) > 3:
+        real_status = get_device_status()
+        if real_status:
+            lock_val = real_status.get("lock")
+            if lock_val == "locked":
+                st.session_state.door_locked = True
+            elif lock_val == "unlocked":
+                st.session_state.door_locked = False
+
+            light_val = real_status.get("light_inside")
+            if light_val in ("on", "off"):
+                st.session_state.light_on = (light_val == "on")
 
 # ========================================================
 # CÁC HOẠT ĐỘNG NGẰM TRONG TRANG WEB 
@@ -147,7 +152,7 @@ if isinstance(new_requests, dict) and new_requests:
                             "action": "Từ chối mở cửa (CSDL chưa có dữ liệu)", "image_url": img_url, "delete_img_url": del_url
                         })
                         if st.session_state.telebot_mode == "Bật":
-                            try: send_telegram_alert(f"🚨 CẢNH BÁO NGƯỜI LẠ!\nThời gian: {time_str}\n⚠️ Kho dữ liệu CSDL hiện tại đang trống!\nẢnh: {img_url}")
+                            try: send_telegram_alert(f"🚨 CẢNH BÁO NGƯỜI LẠ!\nThời gian: {time_str}\n⚠️ Kho dữ liệu CSDL hiện tại đang trống!", image_url=img_url)
                             except Exception: pass
                         delete_processed_request(req_id)
                         
@@ -174,7 +179,7 @@ if isinstance(new_requests, dict) and new_requests:
                                     "action": "Từ chối mở cửa", "image_url": img_url, "delete_img_url": del_url
                                 })
                                 if st.session_state.telebot_mode == "Bật":
-                                    try: send_telegram_alert(f"🚨 CẢNH BÁO NGƯỜI LẠ!\nThời gian: {time_str}\nPhát hiện người lạ trước cửa.\nẢnh: {img_url}")
+                                    try: send_telegram_alert(f"🚨 CẢNH BÁO NGƯỜI LẠ!\nThời gian: {time_str}\nPhát hiện người lạ trước cửa.", image_url=img_url)
                                     except Exception: pass
                                 delete_processed_request(req_id)
                         
@@ -294,14 +299,10 @@ else:
         st.markdown("<h2 style='text-align: left;'>📊 Hệ thống điều khiển thiết bị</h2>", unsafe_allow_html=True)
         st.write("")
 
-        # Tự động cập nhật trạng thái đèn vật lý dựa trên Chế độ Đèn được chọn
-        if st.session_state.light_mode == "Bật":
-            st.session_state.light_on = True
-        elif st.session_state.light_mode == "Tắt":
-            st.session_state.light_on = False
-        # Nếu là "Auto", trạng thái đèn sẽ do cảm biến quyết định (ở đây mặc định tạm thời là Tắt)
-        elif st.session_state.light_mode == "Auto":
-            st.session_state.light_on = False 
+        # Trạng thái bật/tắt đèn hiển thị (st.session_state.light_on) giờ được lấy
+        # trực tiếp từ device_status/light_inside (đọc ở khối đồng bộ phía trên),
+        # tức là trạng thái THẬT của bóng đèn - đúng ở cả 3 chế độ Bật/Tắt/Auto,
+        # kể cả khi đèn tự bật/tắt do cảm biến PIR+BH1750 quyết định ở chế độ Auto.
 
         # 2. CHIA BỐ CỤC LAYOUT THÀNH 2 CỘT: CỬA (TRÁI) & ĐÈN (PHẢI)
         col_door, col_light = st.columns(2, gap="large")
@@ -322,6 +323,7 @@ else:
                 st.write("")
                 if st.button("🔓 Click để mở chốt từ xa", type="primary", width='stretch'):
                     st.session_state.door_locked = False
+                    st.session_state.last_cmd_time = time.time()
                     remote_open_door()
                     st.toast("⚡ Lệnh rút chốt đã được gửi đến thiết bị!")
                     time.sleep(0.5)
@@ -338,6 +340,7 @@ else:
                 st.write("")
                 if st.button("🔒 Click để đóng chốt lại", type="secondary", width='stretch'):
                     st.session_state.door_locked = True
+                    st.session_state.last_cmd_time = time.time()
                     remote_lock_door()
                     st.toast("⚡ Lệnh đóng chốt đã được gửi đến thiết bị!")
                     time.sleep(0.5)
@@ -391,6 +394,7 @@ else:
             # Cập nhật cấu hình khi người dùng đổi chế độ trên giao diện
             if chosen_mode and chosen_mode != st.session_state.light_mode:
                 st.session_state.light_mode = chosen_mode
+                st.session_state.last_cmd_time = time.time()
                 update_light_mode(chosen_mode)
                 st.toast(f"⚙️ Đã chuyển đèn sang chế độ: {chosen_mode}")
                 time.sleep(0.3)
