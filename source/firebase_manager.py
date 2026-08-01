@@ -206,3 +206,69 @@ def load_registered_db():
                     sample_data["embedding"] = decode_vector(sample_data["embedding"])
                     
     return db_data, is_mock_db, JSON_PATH
+
+# ==========================================
+# CÁC HÀM QUẢN LÝ THIẾT BỊ BIÊN
+# ==========================================
+def get_device_control():
+    """Lấy dữ liệu điều khiển từ nhánh device_control"""
+    if not is_mock("mock_database"):
+        try:
+            return db.reference('device_control').get() or {}
+        except Exception as e:
+            st.error(f"Lỗi khi đọc device_control: {e}")
+            return {}
+    return {}
+
+def send_firebase_command(node, value):
+    """Ghi lệnh kèm timestamp xuống Firebase để ép mạch nhận diện sự thay đổi"""
+    if not is_mock("mock_database"):
+        try:
+            payload = {
+                "value": value,
+                "timestamp": int(time.time())
+            }
+            db.reference(f'device_control/{node}').set(payload)
+        except Exception as e:
+            print(f"Lỗi khi gửi lệnh Firebase ({node}): {e}")
+
+def update_ai_status(status):
+    """Trạng thái AI: 'pending', 'known', 'unknown', 'idle'"""
+    send_firebase_command('ai_status', status)
+
+def remote_open_door():
+    """Lệnh mở cửa từ xa"""
+    send_firebase_command('door', 'open')
+    
+def remote_lock_door():
+    """Lệnh khóa cửa từ xa"""
+    send_firebase_command('door', 'close')
+
+def update_light_mode(mode):
+    """Đổi chế độ đèn: 'on', 'off', 'auto'"""
+    mode_map = {"Bật": "on", "Tắt": "off", "Auto": "auto"}
+    command = mode_map.get(mode, "auto")
+    send_firebase_command('light', command)
+
+def change_keypad_password(new_password):
+    """Cập nhật mật khẩu Keypad"""
+    send_firebase_command('pass_keypad', new_password)
+    return True # Trả về True để Web biết đã chạy xong
+
+# ==========================================
+# CÁC HÀM QUẢN LÝ TELEBOT TRÊN DB
+# ==========================================
+def update_telebot_db(mode):
+    if not is_mock("mock_database"):
+        try:
+            db.reference('admin_settings/telebot_mode').set(mode)
+        except:
+            pass
+
+def get_telebot_db():
+    if not is_mock("mock_database"):
+        try:
+            return db.reference('admin_settings/telebot_mode').get() or "Tắt"
+        except:
+            pass
+    return "Tắt"

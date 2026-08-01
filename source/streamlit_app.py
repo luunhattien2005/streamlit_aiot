@@ -8,21 +8,19 @@ import cv2
 import numpy as np
 from streamlit_autorefresh import st_autorefresh
 
-from hardware_control import (
-    update_ai_status, remote_open_door, remote_lock_door, 
-    update_light_mode, change_keypad_password
-)
-
 from firebase_manager import (
     init_firebase, get_new_requests, get_history_logs, delete_processed_request, add_history_log,
     load_registered_db, save_registered_db, upload_to_imgbb, check_door_alert, clear_door_alert,
-    get_admin_credentials_from_db, update_admin_credentials_in_db, get_device_status, is_mock
+    get_admin_credentials_from_db, update_admin_credentials_in_db, get_device_status, get_device_control, is_mock,
+    update_ai_status, remote_open_door, remote_lock_door, update_light_mode, change_keypad_password, # Hàm mới gộp
+    update_telebot_db, get_telebot_db # Hàm quản lý telebot
 )
+
 from telegram_bot import send_telegram_alert
 from face_engine import (fetch_image_from_url, get_face_embedding, find_best_match, warmup_ai_model)
 
 init_firebase()   
-warmup_ai_model() 
+# warmup_ai_model() 
 
 # ========================================================
 # HÀM HỖ TRỢ XỬ LÝ POP-UP IMGBB (ROLLBACK COMPONENT V1)
@@ -76,7 +74,7 @@ if "sync_initial" not in st.session_state:
     st.session_state.door_locked = True
     st.session_state.light_mode = "Auto"
     st.session_state.light_on = False
-    st.session_state.telebot_mode = "Tắt"
+    st.session_state.telebot_mode = get_telebot_db()
     st.session_state.last_cmd_time = 0  # thời điểm web vừa gửi lệnh gần nhất
     st.session_state.sync_initial = True
 
@@ -87,28 +85,34 @@ if "sync_initial" not in st.session_state:
 # thực thi hay chưa). Đây là nhánh phản ánh đúng thực tế phần cứng, kể cả khi
 # trạng thái đổi do chính thiết bị (bàn phím keypad, cảm biến cửa MC-38 tự
 # khóa lại khi đóng cửa vật lý...) chứ không phải do web ra lệnh.
-if not is_mock("mock_database"):
-    # Bỏ qua việc ghi đè trong 3 giây sau khi web vừa tự gửi lệnh, để tránh
-    # hiện tượng "nhấp nháy" quay lại trạng thái cũ trong lúc chờ ESP32 kịp
-    # xử lý và báo cáo trạng thái mới lên device_status.
-    if time.time() - st.session_state.get("last_cmd_time", 0) > 3:
-        real_status = get_device_status()
-        if real_status:
-            lock_val = real_status.get("lock")
-            if lock_val == "locked":
-                st.session_state.door_locked = True
-            elif lock_val == "unlocked":
-                st.session_state.door_locked = False
 
-            light_val = real_status.get("light_inside")
-            if light_val in ("on", "off"):
-                st.session_state.light_on = (light_val == "on")
+if not is_mock("mock_database"):
+    # Tránh đè dữ liệu trong 3s khi người dùng vừa bấm nút trên Web
+    if time.time() - st.session_state.get("last_cmd_time", 0) > 3:
+        from firebase_manager import get_device_control
+        
+        control_data = get_device_control()
+        if control_data:
+            # 1. Cập nhật trạng thái Cửa
+            door_val = control_data.get("door", {}).get("value")
+            if door_val == "open":
+                st.session_state.door_locked = False
+            elif door_val == "close":
+                st.session_state.door_locked = True
+
+            # 2. Cập nhật trạng thái Đèn (Mapping ngược từ "on"/"off"/"auto" sang "Bật"/"Tắt"/"Auto")
+            light_val = control_data.get("light", {}).get("value")
+            mode_map_reverse = {"on": "Bật", "off": "Tắt", "auto": "Auto"}
+            if light_val in mode_map_reverse:
+                st.session_state.light_mode = mode_map_reverse[light_val]
 
 # ========================================================
 # CÁC HOẠT ĐỘNG NGẰM TRONG TRANG WEB 
 # ========================================================
 if st.session_state.get("auto_sync", True):
-    st_autorefresh(interval=10000, key="auto_check_new_request")
+    # Lấy giá trị ui_refresh_rate (giây), mặc định là 10s, rồi nhân với 1000 ra mili-giây
+    interval_ms = st.session_state.get("ui_refresh_rate", 10) * 1000
+    st_autorefresh(interval=interval_ms, key="auto_check_new_request")
 
 registered_db, is_mock_db, JSON_PATH = load_registered_db()
 
@@ -126,69 +130,69 @@ if door_alert:
             pass
     clear_door_alert() # Dọn dẹp cờ cảnh báo trên Database sau khi xử lý xong
 
-if isinstance(new_requests, dict) and new_requests:
-    for req_id, req_data in new_requests.items():
-        if isinstance(req_data, dict) and req_data.get("status") == "pending":
-            img_url = req_data.get("image_url")
-            del_url = req_data.get("delete_img_url", "")
-            req_time = req_data.get("timestamp", int(time.time()))
-            time_str = datetime.fromtimestamp(req_time).strftime("%Y-%m-%d %H:%M:%S") if isinstance(req_time, (int, float)) else str(req_time)
+# if isinstance(new_requests, dict) and new_requests:
+#     for req_id, req_data in new_requests.items():
+#         if isinstance(req_data, dict) and req_data.get("status") == "pending":
+#             img_url = req_data.get("image_url")
+#             del_url = req_data.get("delete_img_url", "")
+#             req_time = req_data.get("timestamp", int(time.time()))
+#             time_str = datetime.fromtimestamp(req_time).strftime("%Y-%m-%d %H:%M:%S") if isinstance(req_time, (int, float)) else str(req_time)
 
-            if img_url:
-                update_ai_status("pending") # Báo mạch kêu 1 bíp ngắn
-                opencv_img, fetch_err = fetch_image_from_url(img_url)
+#             if img_url:
+#                 update_ai_status("pending") # Báo mạch kêu 1 bíp ngắn
+#                 opencv_img, fetch_err = fetch_image_from_url(img_url)
 
-                if opencv_img is not None:
-                    has_samples = any(udata.get("samples") for udata in registered_db.values() if isinstance(udata, dict)) if isinstance(registered_db, dict) else False
-                    log_id = f"log_{req_time}"
+#                 if opencv_img is not None:
+#                     has_samples = any(udata.get("samples") for udata in registered_db.values() if isinstance(udata, dict)) if isinstance(registered_db, dict) else False
+#                     log_id = f"log_{req_time}"
 
-                    # TH1: CSDL Trống
-                    if not has_samples:
-                        update_ai_status("unknown") # CSDL trống -> Hú 5 tiếng
-                        st.toast("🚨 CẢNH BÁO: CSDL trống! Không thể nhận diện (Người lạ)", icon="⚠️")
+#                     # TH1: CSDL Trống
+#                     if not has_samples:
+#                         update_ai_status("unknown") # CSDL trống -> Hú 5 tiếng
+#                         st.toast("🚨 CẢNH BÁO: CSDL trống! Không thể nhận diện (Người lạ)", icon="⚠️")
                         
-                        add_history_log(log_id, {
-                            "timestamp": time_str, "person_name": "Người lạ", 
-                            "action": "Từ chối mở cửa (CSDL chưa có dữ liệu)", "image_url": img_url, "delete_img_url": del_url
-                        })
-                        if st.session_state.telebot_mode == "Bật":
-                            try: send_telegram_alert(f"🚨 CẢNH BÁO NGƯỜI LẠ!\nThời gian: {time_str}\n⚠️ Kho dữ liệu CSDL hiện tại đang trống!", image_url=img_url)
-                            except Exception: pass
-                        delete_processed_request(req_id)
+#                         add_history_log(log_id, {
+#                             "timestamp": time_str, "person_name": "Người lạ", 
+#                             "action": "Từ chối mở cửa (CSDL chưa có dữ liệu)", "image_url": img_url, "delete_img_url": del_url
+#                         })
+#                         if st.session_state.telebot_mode == "Bật":
+#                             try: send_telegram_alert(f"🚨 CẢNH BÁO NGƯỜI LẠ!\nThời gian: {time_str}\n⚠️ Kho dữ liệu CSDL hiện tại đang trống!", image_url=img_url)
+#                             except Exception: pass
+#                         delete_processed_request(req_id)
                         
-                    # TH2: Có CSDL
-                    else:
-                        embedding, bbox, err = get_face_embedding(opencv_img)
-                        if not err and embedding is not None:
-                            best_name, min_dist, similarity, _ = find_best_match(embedding, registered_db)
+#                     # TH2: Có CSDL
+#                     else:
+#                         embedding, bbox, err = get_face_embedding(opencv_img)
+#                         if not err and embedding is not None:
+#                             best_name, min_dist, similarity, _ = find_best_match(embedding, registered_db)
                             
-                            if "Người lạ" not in best_name:
-                                update_ai_status("known") # Người quen -> Kêu 2 bíp, mở cửa
-                                st.session_state.door_locked = False
-                                st.toast(f"🔓 Đã mở cửa cho: {best_name} ({similarity:.1f}%)")
-                                add_history_log(log_id, {
-                                    "timestamp": time_str, "person_name": best_name, 
-                                    "action": f"Mở cửa thành công ({similarity:.1f}%)", "image_url": img_url, "delete_img_url": del_url
-                                })
-                                delete_processed_request(req_id)
-                            else:
-                                update_ai_status("unknown") # Người lạ -> Hú 5 tiếng
-                                st.toast("🚨 CẢNH BÁO: Phát hiện người lạ trước cửa!", icon="⚠️")
-                                add_history_log(log_id, {
-                                    "timestamp": time_str, "person_name": "Người lạ", 
-                                    "action": "Từ chối mở cửa", "image_url": img_url, "delete_img_url": del_url
-                                })
-                                if st.session_state.telebot_mode == "Bật":
-                                    try: send_telegram_alert(f"🚨 CẢNH BÁO NGƯỜI LẠ!\nThời gian: {time_str}\nPhát hiện người lạ trước cửa.", image_url=img_url)
-                                    except Exception: pass
-                                delete_processed_request(req_id)
+#                             if "Người lạ" not in best_name:
+#                                 update_ai_status("known") # Người quen -> Kêu 2 bíp, mở cửa
+#                                 st.session_state.door_locked = False
+#                                 st.toast(f"🔓 Đã mở cửa cho: {best_name} ({similarity:.1f}%)")
+#                                 add_history_log(log_id, {
+#                                     "timestamp": time_str, "person_name": best_name, 
+#                                     "action": f"Mở cửa thành công ({similarity:.1f}%)", "image_url": img_url, "delete_img_url": del_url
+#                                 })
+#                                 delete_processed_request(req_id)
+#                             else:
+#                                 update_ai_status("unknown") # Người lạ -> Hú 5 tiếng
+#                                 st.toast("🚨 CẢNH BÁO: Phát hiện người lạ trước cửa!", icon="⚠️")
+#                                 add_history_log(log_id, {
+#                                     "timestamp": time_str, "person_name": "Người lạ", 
+#                                     "action": "Từ chối mở cửa", "image_url": img_url, "delete_img_url": del_url
+#                                 })
+#                                 if st.session_state.telebot_mode == "Bật":
+#                                     try: send_telegram_alert(f"🚨 CẢNH BÁO NGƯỜI LẠ!\nThời gian: {time_str}\nPhát hiện người lạ trước cửa.", image_url=img_url)
+#                                     except Exception: pass
+#                                 delete_processed_request(req_id)
                         
-                        # BỔ SUNG ĐOẠN ELSE NÀY ĐỂ VÁ LỖI
-                        else:
-                            st.toast("⚠️ Ảnh lỗi hoặc không tìm thấy khuôn mặt, đã tự động hủy!", icon="🗑️")
-                            delete_processed_request(req_id) # Bắt buộc phải chém bỏ request rác
-                time.sleep(2) 
-                update_ai_status("idle") # Trả hệ thống về trạng thái chờ
+#                         # BỔ SUNG ĐOẠN ELSE NÀY ĐỂ VÁ LỖI
+#                         else:
+#                             st.toast("⚠️ Ảnh lỗi hoặc không tìm thấy khuôn mặt, đã tự động hủy!", icon="🗑️")
+#                             delete_processed_request(req_id) # Bắt buộc phải chém bỏ request rác
+#                 time.sleep(2) 
+#                 update_ai_status("idle") # Trả hệ thống về trạng thái chờ
 
     
 
@@ -239,13 +243,24 @@ else:
             st.rerun()
 
         st.write("---")
-        st.markdown("### ⚙️ Hệ thống ngầm")
-        # Công tắc bật/tắt quét tự động. Lưu vào session_state để nhớ trạng thái.
+        st.markdown("### ⚙️ Hệ thống tự động")
+        
+        # Công tắc bật/tắt quét tự động cho Web
         st.session_state.auto_sync = st.toggle(
-            "🔄 Quét khuôn mặt tự động", 
-            value=True, 
+            "🔄 Tự động cập nhật Web", 
+            value=st.session_state.get("auto_sync", True), 
             help="Tắt tạm thời khi bạn cần tải ảnh/nhập liệu để web không bị load lại giữa chừng."
         )
+
+        # Thanh chỉnh tốc độ làm mới của RIÊNG UI Web (Lưu vào session_state)
+        if st.session_state.auto_sync:
+            st.session_state.ui_refresh_rate = st.number_input(
+                "⏱️ Tốc độ làm mới UI (giây)", 
+                min_value=3, max_value=60, 
+                value=st.session_state.get("ui_refresh_rate", 10), 
+                step=1,
+                help="Bao lâu thì trang web tự động tải lại 1 lần."
+            )
 
     # Nếu trạng thái show_change_pw là True, hiển thị Form nhập mật khẩu mới ngay bên dưới sidebar hoặc ở góc phù hợp
     if st.session_state.show_change_pw:
@@ -279,7 +294,7 @@ else:
                                 st.rerun()
 
 
-# Tiêu đề chính của Web Dashboard
+    # Tiêu đề chính của Web Dashboard
     st.title("Hệ thống Cửa thông minh AIoT")
     st.write("---") 
 
@@ -293,22 +308,42 @@ else:
 
 
     # ----------------------------------------------------
-    # TAB 1: BẢNG ĐIỀU KHIỂN TRUNG TÂM
+    # TAB 1: BẢNG ĐIỀU KHIỂN CHÍNH
     # ----------------------------------------------------
     with tab_control:
         st.markdown("<h2 style='text-align: left;'>📊 Hệ thống điều khiển thiết bị</h2>", unsafe_allow_html=True)
-        st.write("")
+        
+        # --- LOGIC KIỂM TRA TRẠNG THÁI AI SERVER (HEARTBEAT) ---
+        is_server_online = False
+        server_uptime_str = "00h 00m 00s"
+        current_refresh_rate = 3.0
 
-        # Trạng thái bật/tắt đèn hiển thị (st.session_state.light_on) giờ được lấy
-        # trực tiếp từ device_status/light_inside (đọc ở khối đồng bộ phía trên),
-        # tức là trạng thái THẬT của bóng đèn - đúng ở cả 3 chế độ Bật/Tắt/Auto,
-        # kể cả khi đèn tự bật/tắt do cảm biến PIR+BH1750 quyết định ở chế độ Auto.
+        if not is_mock("mock_database"):
+            from firebase_admin import db
+            current_refresh_rate = db.reference('server_status/refresh_rate').get() or 3.0
+            info = db.reference('server_status/info').get() or {}
+            last_update_str = info.get("last_update", "")
 
-        # 2. CHIA BỐ CỤC LAYOUT THÀNH 2 CỘT: CỬA (TRÁI) & ĐÈN (PHẢI)
-        col_door, col_light = st.columns(2, gap="large")
+            if last_update_str:
+                try:
+                    last_time = datetime.strptime(last_update_str, "%Y-%m-%d %H:%M:%S")
+                    diff_seconds = (datetime.now() - last_time).total_seconds()
+                    if diff_seconds <= (float(current_refresh_rate) + 7.0):
+                        is_server_online = True
+                        server_uptime_str = info.get("uptime", "00h 00m 00s")
+                except Exception:
+                    pass
 
-        # --- CỘT BÊN TRÁI: ĐIỀU KHIỂN CỬA RA VÀO VÀ PASS KEYPAD---
-        with col_door:
+        if not is_server_online:
+            server_uptime_str = "00h 00m 00s"
+
+        col_left, col_right = st.columns(2, gap="large")
+
+        # ====================================================
+        # CỘT TRÁI (LEFT COLUMN)
+        # ====================================================
+        with col_left:
+            # 1. Khối Quản lý Chốt cửa (Code cũ của bạn + update biến time)
             st.markdown("### 🚪 Quản lý Chốt cửa")
             
             if st.session_state.door_locked:
@@ -321,9 +356,9 @@ else:
                     """, unsafe_allow_html=True
                 )
                 st.write("")
-                if st.button("🔓 Click để mở chốt từ xa", type="primary", width='stretch'):
+                if st.button("🔓 Click để mở chốt từ xa", key="btn_open_door", type="primary", use_container_width=True):
                     st.session_state.door_locked = False
-                    st.session_state.last_cmd_time = time.time()
+                    st.session_state.last_cmd_time = time.time()  # Quan trọng: Cập nhật thời gian gửi lệnh
                     remote_open_door()
                     st.toast("⚡ Lệnh rút chốt đã được gửi đến thiết bị!")
                     time.sleep(0.5)
@@ -338,82 +373,114 @@ else:
                     """, unsafe_allow_html=True
                 )
                 st.write("")
-                if st.button("🔒 Click để đóng chốt lại", type="secondary", width='stretch'):
+                if st.button("🔒 Click để đóng chốt lại", key="btn_lock_door", type="secondary", use_container_width=True):
                     st.session_state.door_locked = True
-                    st.session_state.last_cmd_time = time.time()
+                    st.session_state.last_cmd_time = time.time()  # Quan trọng: Cập nhật thời gian gửi lệnh
                     remote_lock_door()
                     st.toast("⚡ Lệnh đóng chốt đã được gửi đến thiết bị!")
                     time.sleep(0.5)
                     st.rerun()
 
-            # ... Code hiển thị trạng thái nút Mở/Khóa cửa cũ
-            st.write("---")
-            st.markdown("### 🔑 Đổi mật khẩu cửa (Keypad)")
-            with st.form("keypad_pw_form"):
-                new_kp_pw = st.text_input("Mật khẩu Keypad mới:", type="password", placeholder="Nhập số (VD: 789)...")
-                if st.form_submit_button("Cập nhật vào bộ nhớ mạch", width='stretch'):
-                    if new_kp_pw:
-                        change_keypad_password(new_kp_pw)
-                        st.success(f"Đã gửi lệnh đổi mật khẩu cửa thành công!")
-                    else:
-                        st.error("Vui lòng không để trống mật khẩu!")
-
-        # --- CỘT BÊN PHẢI: ĐIỀU KHIỂN ĐÈN HỆ THỐNG ---
-        with col_light:
-            st.markdown("### 💡 Hệ thống Đèn chiếu sáng")
-            
-            if st.session_state.light_on:
-                st.markdown(
-                    """
-                    <div style='background-color: #fffbe6; padding: 20px; border-radius: 10px; text-align: center; border-left: 6px solid #faad14;'>
-                        <h4 style='color: #faad14; margin: 0; font-size: 18px;'>💡 TRẠNG THÁI: ĐÈN ĐANG BẬT</h4>
-                        <p style='color: #666; margin: 5px 0 0 0; font-size: 13px;'>Hệ thống đèn đang tiêu thụ điện năng</p>
-                    </div>
-                    """, unsafe_allow_html=True
-                )
-            else:
-                st.markdown(
-                    """
-                    <div style='background-color: #f5f5f5; padding: 20px; border-radius: 10px; text-align: center; border-left: 6px solid #bfbfbf;'>
-                        <h4 style='color: #595959; margin: 0; font-size: 18px;'>🌑 TRẠNG THÁI: ĐÈN ĐANG TẮT</h4>
-                        <p style='color: #666; margin: 5px 0 0 0; font-size: 13px;'>Khu vực hiện tại không bật đèn</p>
-                    </div>
-                    """, unsafe_allow_html=True
-                )
-            
             st.write("")
-            
-            # Chọn chế độ hoạt động của đèn
-            chosen_mode = st.segmented_control(
-                "Thay đổi chế độ hoạt động của đèn:",
-                options=["Bật", "Tắt", "Auto"],
-                default=st.session_state.light_mode,
-                key="light_mode_control"
-            )
-            
-            # Cập nhật cấu hình khi người dùng đổi chế độ trên giao diện
-            if chosen_mode and chosen_mode != st.session_state.light_mode:
-                st.session_state.light_mode = chosen_mode
-                st.session_state.last_cmd_time = time.time()
-                update_light_mode(chosen_mode)
-                st.toast(f"⚙️ Đã chuyển đèn sang chế độ: {chosen_mode}")
-                time.sleep(0.3)
-                st.rerun()
 
-            # Chọn chế độ hoạt đông của telebot
-            chosen_mode = st.segmented_control(
-                "Bật thông báo thông qua telebot:",
-                options=["Bật", "Tắt"],
-                default=st.session_state.telebot_mode,
-                key="telebot_control"
-            )
+            # 2. Khối Hệ thống Đèn chiếu sáng
+            st.markdown("### 💡 Hệ thống Đèn chiếu sáng")
 
-            # Cập nhật khi đổi trạng thái telebot
-            if chosen_mode != st.session_state.telebot_mode:
-                st.session_state.telebot_mode = chosen_mode
-                st.rerun()
-        
+            if st.session_state.light_mode == "Bật":
+                light_status_str = "ĐÈN ĐANG BẬT"
+                st.info(f"💡 **TRẠNG THÁI:** {light_status_str}")
+            elif st.session_state.light_mode == "Tắt":
+                light_status_str = "ĐÈN ĐANG TẮT"
+                st.warning(f"🌑 **TRẠNG THÁI:** {light_status_str}")
+            else:
+                light_status_str = "TỰ ĐỘNG (THEO CẢM BIẾN)"
+                st.markdown(f"> ⚙️ **TRẠNG THÁI:** {light_status_str}")
 
+            st.caption("Thay đổi chế độ hoạt động của đèn:")
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                if st.button("Bật", key="btn_light_on", use_container_width=True, type="primary" if st.session_state.light_mode == "Bật" else "secondary"):
+                    st.session_state.light_mode = "Bật"
+                    st.session_state.last_cmd_time = time.time()  # Chống kẹt đèn
+                    update_light_mode("Bật")
+                    st.rerun()
+            with c2:
+                if st.button("Tắt", key="btn_light_off", use_container_width=True, type="primary" if st.session_state.light_mode == "Tắt" else "secondary"):
+                    st.session_state.light_mode = "Tắt"
+                    st.session_state.last_cmd_time = time.time()
+                    update_light_mode("Tắt")
+                    st.rerun()
+            with c3:
+                if st.button("Auto", key="btn_light_auto", use_container_width=True, type="primary" if st.session_state.light_mode == "Auto" else "secondary"):
+                    st.session_state.light_mode = "Auto"
+                    st.session_state.last_cmd_time = time.time()
+                    update_light_mode("Auto")
+                    st.rerun()
+
+            st.caption("Bật thông báo thông qua Telebot:")
+            tb1, tb2 = st.columns(2)
+            with tb1:
+                if st.button("Bật", key="btn_tele_on", use_container_width=True, type="primary" if st.session_state.telebot_mode == "Bật" else "secondary"):
+                    st.session_state.telebot_mode = "Bật"
+                    update_telebot_db("Bật")
+                    st.rerun()
+            with tb2:
+                if st.button("Tắt", key="btn_tele_off", use_container_width=True, type="primary" if st.session_state.telebot_mode == "Tắt" else "secondary"):
+                    st.session_state.telebot_mode = "Tắt"
+                    update_telebot_db("Tắt")
+                    st.rerun()
+
+        # ====================================================
+        # CỘT PHẢI (RIGHT COLUMN)
+        # ====================================================
+        with col_right:
+            # 1. Khối Đổi mật khẩu cửa Keypad
+            st.markdown("### 🔑 Đổi mật khẩu cửa (Keypad)")
+            with st.container(border=True):
+                new_keypad_pass = st.text_input("Mật khẩu Keypad mới:", type="password", placeholder="Nhập số (VD: 789)...")
+                if st.button("Cập nhật vào bộ nhớ mạch", use_container_width=True):
+                    if new_keypad_pass.isdigit():
+                        if change_keypad_password(new_keypad_pass):
+                            st.toast("✅ Đã cập nhật mật khẩu Keypad mới!", icon="🔑")
+                        else:
+                            st.error("Không thể kết nối Database!")
+                    else:
+                        st.warning("Vui lòng chỉ nhập chuỗi chữ số!")
+
+            st.write("")
+
+            # 2. Khối Trạng thái AI Server
+            st.markdown("### 🖥️ Trạng thái AI Server")
+            with st.container(border=True):
+                st_col1, st_col2 = st.columns([1, 1], vertical_alignment="center")
+                with st_col1:
+                    if is_server_online:
+                        st.markdown("🟢 **ONLINE**")
+                    else:
+                        st.markdown("🔴 **OFFLINE**")
+                with st_col2:
+                    st.markdown(f"⏱️ **Uptime:** `{server_uptime_str}`")
+
+                st.divider()
+
+                rf_col1, rf_col2 = st.columns([2, 1], vertical_alignment="bottom")
+                with rf_col1:
+                    new_rate = st.number_input(
+                        "Tốc độ quét (s):", 
+                        min_value=1.0, max_value=60.0, 
+                        value=float(current_refresh_rate), step=1.0,
+                        key="compact_refresh_rate"
+                    )
+                with rf_col2:
+                    if st.button("Lưu", type="primary", use_container_width=True, key="compact_save_rate"):
+                        if not is_mock("mock_database"):
+                            from firebase_admin import db
+                            db.reference('server_status/refresh_rate').set(new_rate)
+                            st.toast(f"✅ Đã đổi chu kỳ quét: {new_rate}s")
+                            time.sleep(0.5)
+                            st.rerun()
+                        else:
+                            st.warning("Đang ở chế độ Mock!")
 
     # ----------------------------------------------------
     # TAB 2: DEV TEST NEW REQ 

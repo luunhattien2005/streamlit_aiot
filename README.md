@@ -2,7 +2,7 @@
 
 Built for web dashboards and lightweight face recognition hosting using Streamlit.
 
-To run streamlit local, install `streamlit and all req libs`, then run `streamlit run <file python>`
+To run local streamlit, install `streamlit and all req libs`, then run `streamlit run <file python>`
 
 ```Markdown
 streamlit run .\source\streamlit_app.py
@@ -10,13 +10,21 @@ streamlit run .\source\streamlit_app.py
 
 Global hosting at: [esp32cam.streamlit.app](https://esp32cam.streamlit.app/)
 
+
+To run local face recognition server:
+
+```Markdown
+python .\source\face_rec_server.py
+```
+
+
 Notes:
 
-* Python: `3.13`.
+* Python: `3.13.x`.
 * Main file path on deploy: `source/streamlit_app.py`.
 * When deployed, main file path can not be changed (deploy a new one instead if needed).
 
-## 📖 Hướng Dẫn Sử Dụng
+## 📖 Hướng Dẫn Sử Dụng sẽ cập nhật sau khi có docs chính thức
 
 Giao diện ứng dụng được chia thành 3 Tabs:
 
@@ -24,7 +32,7 @@ Giao diện ứng dụng được chia thành 3 Tabs:
 * **Tab 2 - 📊 Lịch Sử Ra Vào** : Bảng Dashboard thống kê toàn bộ lịch sử ra vào (thời gian, tên người, hành động mở/từ chối).
 * **Tab 3 - 👤 Đăng ký Khuôn Mặt** : Giao diện thêm người dùng mới vào hệ thống. Bạn nhập tên, tải ảnh lên, AI sẽ trích xuất vector Embedding và lưu thẳng lên Firebase. Khuyến khích đăng ký nhiều góc mặt cho cùng một người để tăng độ chính xác.
 
-## 🗄️ Database Schema (Firebase)
+## 🗄️ Database Schema (Firebase) 
 
 Hệ thống lưu trữ trên Firebase Realtime Database với 3 nhánh chính:
 
@@ -47,7 +55,6 @@ Lưu lại toàn bộ kết quả sau khi AI xử lý xong.
   * `action`: String ("Mở cửa thành công (XX.X%)" | "Từ chối mở cửa").
   * `delete_img_url`: String (Link dùng để xóa ảnh trên ImgBB).
 
-
 **3. `registered`** (Nhánh dữ liệu người dùng)
 Lưu trữ thông tin nhận diện khuôn mặt.
 
@@ -58,7 +65,7 @@ Lưu trữ thông tin nhận diện khuôn mặt.
       * `delete_img_url`: String (Link dùng để xóa ảnh trên ImgBB).
       * `embedding`: String (encode Base64 từ vector đặc trưng ảnh).
       * `image_url`: String (Link ảnh).
-  * `updated_at`: String (YYYY-MM-DD HH:MM:SS).      
+  * `updated_at`: String (YYYY-MM-DD HH:MM:SS).
 
 ## 🔄 Luồng Hoạt Động (System Flow)
 
@@ -73,4 +80,3 @@ Lưu trữ thông tin nhận diện khuôn mặt.
 Dự án này sử dụng cơ chế bảo mật của Streamlit thông qua file `.streamlit/secrets.toml` để kết nối Firebase.
 
 * **Vui lòng liên hệ trực tiếp chủ dự án** để nhận nội dung file secret này.
-
