@@ -20,7 +20,7 @@ from telegram_bot import send_telegram_alert
 from face_engine import (fetch_image_from_url, get_face_embedding, find_best_match, warmup_ai_model)
 
 init_firebase()   
-# warmup_ai_model() 
+warmup_ai_model() 
 
 # ========================================================
 # HÀM HỖ TRỢ XỬ LÝ POP-UP IMGBB (ROLLBACK COMPONENT V1)
