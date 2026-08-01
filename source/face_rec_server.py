@@ -155,6 +155,7 @@ def main():
             time.sleep(current_rate)
 
         except KeyboardInterrupt:
+            sync_to_firebase("00h 00m 00s")
             print("\n\n🛑 Đã ngắt Server thành công!")
             break
         except Exception as e:

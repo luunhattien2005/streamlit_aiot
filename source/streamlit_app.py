@@ -322,15 +322,19 @@ else:
             from firebase_admin import db
             current_refresh_rate = db.reference('server_status/refresh_rate').get() or 3.0
             info = db.reference('server_status/info').get() or {}
+            
             last_update_str = info.get("last_update", "")
+            uptime_str_db = info.get("uptime", "00h 00m 00s")
 
-            if last_update_str:
+            # Nếu uptime không phải là lúc vừa tắt, thì mới check thời gian
+            if uptime_str_db != "00h 00m 00s" and last_update_str:
                 try:
                     last_time = datetime.strptime(last_update_str, "%Y-%m-%d %H:%M:%S")
                     diff_seconds = (datetime.now() - last_time).total_seconds()
+                    
                     if diff_seconds <= (float(current_refresh_rate) + 7.0):
                         is_server_online = True
-                        server_uptime_str = info.get("uptime", "00h 00m 00s")
+                        server_uptime_str = uptime_str_db
                 except Exception:
                     pass
 
