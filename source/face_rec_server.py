@@ -5,9 +5,9 @@ from collections import deque
 from firebase_admin import db
 
 # Import các module từ hệ thống
-from hardware_control import update_ai_status
+
 from firebase_manager import (
-    init_firebase, get_new_requests, delete_processed_request, 
+    init_firebase, get_new_requests, delete_processed_request, update_ai_status,
     add_history_log, load_registered_db, check_door_alert, clear_door_alert, is_mock
 )
 from telegram_bot import send_telegram_alert
