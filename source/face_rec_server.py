@@ -9,7 +9,7 @@ from firebase_manager import (
     add_history_log, load_registered_db, check_door_alert, clear_door_alert, is_mock
 )
 from telegram_bot import send_telegram_alert
-from face_engine import fetch_image_from_url, get_face_embedding, find_best_match, warmup_ai_model
+from face_engine import fetch_image_from_url, get_face_embedding, find_best_match, warmup_ai_model, VGG_FACE_THRESHOLD
 
 MAX_LOGS = 20                           # Lưu tối đa 20 dòng log gần nhất
 log_queue = deque(maxlen=MAX_LOGS)      # Queue lưu log dạng FIFO
@@ -85,27 +85,52 @@ def process_ai_recognition(registered_db):
                                 "timestamp": time_str, "person_name": "Người lạ", 
                                 "action": "Từ chối mở cửa (CSDL rỗng)", "image_url": img_url, "delete_img_url": del_url
                             })
+
+                            try:
+                                msg = f"⚠️ *THÔNG BÁO* ⚠️\nCó người cố gắng quét mặt lúc {time_str}, nhưng CSDL hiện đang trống!"
+                                send_telegram_alert(msg, image_url=img_url)
+                            except Exception:
+                                pass
+
                             delete_processed_request(req_id)
                         else:
                             add_log("🧠 Bắt đầu trích xuất đặc trưng...")
                             embedding, bbox, err = get_face_embedding(opencv_img)
                             
                             if not err and embedding is not None:
+
                                 best_name, min_dist, similarity, _ = find_best_match(embedding, registered_db)
+                                threshold_percent = (1.0 - VGG_FACE_THRESHOLD) * 100
+
                                 if "Người lạ" not in best_name:
                                     update_ai_status("known") 
-                                    add_log(f"✅ MỞ CỬA: {best_name} ({similarity:.1f}%)")
+                                    add_log(f"✅ MỞ CỬA: {best_name} ({similarity:.1f}% / {threshold_percent:.1f}%).")
                                     add_history_log(log_id, {
-                                        "timestamp": time_str, "person_name": best_name, 
-                                        "action": f"Mở cửa ({similarity:.1f}%)", "image_url": img_url, "delete_img_url": del_url
+                                        "timestamp": time_str, 
+                                        "person_name": best_name, 
+                                        "action": f"Mở cửa ({similarity:.1f}%/{threshold_percent:.1f}%)", 
+                                        "image_url": img_url, 
+                                        "delete_img_url": del_url
                                     })
+
                                 else:
                                     update_ai_status("unknown")
-                                    add_log(f"🚨 Người lạ! Từ chối mở cửa.")
+                                    add_log(f"🚨 Người lạ! Từ chối mở cửa ({similarity:.1f}% / {threshold_percent:.1f}%).")
                                     add_history_log(log_id, {
-                                        "timestamp": time_str, "person_name": "Người lạ", 
-                                        "action": "Từ chối mở cửa", "image_url": img_url, "delete_img_url": del_url
+                                        "timestamp": time_str, 
+                                        "person_name": "Người lạ", 
+                                        "action": f"Từ chối ({similarity:.1f}%/{threshold_percent:.1f}%)", 
+                                        "image_url": img_url, 
+                                        "delete_img_url": del_url
                                     })
+
+                                    # Gửi Telegram
+                                    try:
+                                        msg = f"🚨 *CẢNH BÁO AN NINH* 🚨\nPhát hiện người lạ cố gắng mở cửa lúc {time_str}!\nĐộ nhận diện: {similarity:.1f}% (Ngưỡng yêu cầu: {threshold_percent:.1f}%)"
+                                        send_telegram_alert(msg, image_url=img_url)
+                                    except Exception:
+                                        pass
+
                                 delete_processed_request(req_id)
                             else:
                                 add_log("⚠️ Ảnh lỗi hoặc không rõ mặt.")
@@ -132,11 +157,35 @@ def main():
     last_db_check = 0
     registered_db = {}
 
+    last_user_count = -1
+    last_sample_count = -1
+
     while True:
         try:
+            # Quét DB mỗi 15 giây hoặc khi DB đang trống
             if time.time() - last_db_check > 15 or not registered_db:
-                registered_db, _, _ = load_registered_db()
+                new_db, _, _ = load_registered_db()
                 last_db_check = time.time()
+                
+                # Đếm tổng số người và tổng số ảnh hiện có
+                users_count = len(new_db)
+                samples_count = sum(len(u.get("samples", {})) for u in new_db.values() if isinstance(u, dict))
+                
+                # Chỉ ghi log nếu CSDL có sự thay đổi (thêm/bớt người, thêm/bớt ảnh) hoặc lần đầu khởi chạy
+                if users_count != last_user_count or samples_count != last_sample_count:
+                    registered_db = new_db
+                    add_log(f"🔄 Đã tải CSDL Face: {users_count} người, tổng {samples_count} ảnh.")
+                    
+                    # Liệt kê chi tiết từng người
+                    for uid, udata in registered_db.items():
+                        if isinstance(udata, dict):
+                            name = udata.get("name", "Unknown")
+                            img_count = len(udata.get("samples", {}))
+                            add_log(f"   👤 {name}: {img_count} ảnh")
+                            
+                    # Cập nhật lại mốc so sánh
+                    last_user_count = users_count
+                    last_sample_count = samples_count
 
             current_rate = get_refresh_rate()
             process_ai_recognition(registered_db)

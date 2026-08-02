@@ -1,7 +1,7 @@
 import streamlit as st
 import time
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import json
 import os
 import cv2
@@ -129,10 +129,12 @@ except Exception: new_requests = {}
 # --- LOGIC XỬ LÝ CẢNH BÁO 180S ---
 door_alert = check_door_alert()
 if door_alert:
-    st.toast("🚨 CẢNH BÁO: Cửa mở liên tục quá 3 phút!", icon="⚠️")
+    st.toast("🚨 CẢNH BÁO: Cửa đã mở liên tục quá 3 phút!", icon="⚠️")
     if st.session_state.telebot_mode == "Bật":
         try: 
-            send_telegram_alert(f"🚨 CẢNH BÁO AN NINH!\nThời gian: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n⚠️ Cửa phòng đã mở liên tục quá 3 phút mà chưa được đóng lại!")
+            tz_VN = timezone(timedelta(hours=7))
+            current_alert_time = datetime.now(tz_VN).strftime('%Y-%m-%d %H:%M:%S')
+            send_telegram_alert(f"🚨 CẢNH BÁO AN NINH!\nThời gian: {current_alert_time}\n⚠️ Cửa phòng đã mở liên tục quá 3 phút mà chưa được đóng lại!")
         except Exception: 
             pass
     clear_door_alert() # Dọn dẹp cờ cảnh báo trên Database sau khi xử lý xong
@@ -798,7 +800,8 @@ else:
                             if err:
                                 st.error(f"Thất bại: {err}")
                             else:
-                                current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                tz_VN = timezone(timedelta(hours=7))
+                                current_time_str = datetime.now(tz_VN).strftime("%Y-%m-%d %H:%M:%S")
                                 safe_filename = "".join([c for c in reg_name if c.isalnum() or c in (' ', '_', '-')]).strip()
                                 sample_id = f"sample_{int(time.time())}"
                                 

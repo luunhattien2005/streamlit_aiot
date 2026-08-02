@@ -4,6 +4,10 @@ import cv2
 import numpy as np
 from deepface import DeepFace
 
+# Ngưỡng (Threshold) chuẩn của model VGG-Face dùng Cosine
+VGG_FACE_THRESHOLD = 0.40 
+FACENET_THRESHOLD  = 0.40
+
 def fetch_image_from_url(url):
     try:
         response = requests.get(url, timeout=10)
@@ -65,9 +69,6 @@ def find_best_match_old(target_embedding, registered_db):
     
     best_match_name = "Người lạ"
     min_distance = float("inf")
-    # Ngưỡng (Threshold) chuẩn của model VGG-Face dùng Cosine
-    VGG_FACE_THRESHOLD = 0.40 
-    FACENET_THRESHOLD  = 0.40
 
     for uid, data in registered_db.items():
         db_embedding = data.get("embedding")
@@ -92,7 +93,7 @@ def find_best_match(target_embedding, registered_db):
     
     best_match_name = "Người lạ"
     min_distance = float("inf")
-    VGG_FACE_THRESHOLD = 0.40
+
     match_details = []
 
     # Lặp qua từng người dùng
