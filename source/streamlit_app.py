@@ -571,7 +571,8 @@ else:
                 "Delete_URL": log_val.get("delete_img_url", "")
             })
         df = pd.DataFrame(formatted_logs) # Tạo bảng Pandas DataFrame từ danh sách đã chuẩn hóa
-        
+        if not df.empty:
+            df = df.sort_values(by="Thời gian", ascending=False).reset_index(drop=True)
 
         # 3. HIỂN THỊ RA GIAO DIỆN NẾU CÓ DỮ LIỆU
         if not df.empty:
@@ -624,6 +625,83 @@ else:
                             st.image(local_path, caption=f"Ảnh local: {img_path_or_url}", width='stretch')
                         else:
                             st.error(f"❌ Không tìm thấy file `{img_path_or_url}` trong thư mục `Face_History/`.")
+
+                    st.write("---")
+                    with st.expander("➕ Đăng ký ảnh này vào CSDL", expanded=False):
+                        # Load lại DB để có dữ liệu mới nhất
+                        current_db, is_mock_db_history, history_json_path = load_registered_db()
+                        valid_keys = [uid for uid, udata in current_db.items() if isinstance(udata, dict) and "name" in udata]
+                        
+                        add_mode = st.radio("Chế độ lưu:", ["Tạo người mới", "Thêm góc mặt cho người cũ"], key="hist_add_mode", horizontal=True)
+                        reg_name = ""
+                        target_uid = None
+                        
+                        if add_mode == "Tạo người mới":
+                            reg_name = st.text_input("Nhập họ và tên:", placeholder="Ví dụ: Nguyễn Văn A", key="hist_reg_name")
+                            target_uid = f"user_{int(time.time())}"
+                        else:
+                            if not valid_keys:
+                                st.warning("Chưa có ai trong CSDL!")
+                            else:
+                                target_uid = st.selectbox(
+                                    "Chọn người dùng:", 
+                                    options=valid_keys, 
+                                    format_func=lambda x: f"{current_db[x]['name']} ({len(current_db[x].get('samples', {}))} ảnh)",
+                                    key="hist_target_uid"
+                                )
+                                reg_name = current_db[target_uid]["name"] if target_uid else ""
+                                
+                        if st.button("Lưu ảnh vào hệ thống", type="primary", use_container_width=True, key="hist_save_btn"):
+                            if not reg_name.strip():
+                                st.error("Vui lòng nhập/chọn tên!")
+                            else:
+                                with st.spinner("AI đang trích xuất khuôn mặt..."):
+                                    # Lấy ảnh OpenCV để đưa vào DeepFace
+                                    opencv_img = None
+                                    if img_path_or_url.startswith("http"):
+                                        opencv_img, fetch_err = fetch_image_from_url(img_path_or_url)
+                                        if opencv_img is not None: 
+                                            opencv_img = cv2.cvtColor(opencv_img, cv2.COLOR_BGR2RGB)
+                                    elif os.path.exists(img_path_or_url):
+                                        opencv_img = cv2.imread(img_path_or_url)
+                                        if opencv_img is not None: opencv_img = cv2.cvtColor(opencv_img, cv2.COLOR_BGR2RGB)
+
+                                    if opencv_img is not None:
+                                        embedding, bbox, err = get_face_embedding(opencv_img)
+                                        if err:
+                                            st.error(f"Thất bại: {err}")
+                                        else:
+                                            tz_VN = timezone(timedelta(hours=7))
+                                            sample_id = f"sample_{int(time.time())}"
+                                            sample_data = {"embedding": embedding}
+                                            
+                                            if is_mock_db_history:
+                                                safe_filename = "".join([c for c in reg_name if c.isalnum() or c in (' ', '_', '-')]).strip()
+                                                filename = f"{safe_filename}_{sample_id}.jpg"
+                                                full_img_path = os.path.join("./source/Face_Database", filename)
+                                                cv2.imwrite(full_img_path, cv2.cvtColor(opencv_img, cv2.COLOR_RGB2BGR))
+                                                sample_data["image_path"] = filename
+                                            else:
+                                                # Cố tình Re-upload lên ImgBB để tạo Link Xóa (Delete_URL) độc lập, 
+                                                # tránh lỗi xóa Log ở Lịch sử làm mất luôn cả ảnh trong DB
+                                                new_img_url, new_del_url = upload_to_imgbb(opencv_img)
+                                                if new_img_url:
+                                                    sample_data["image_url"] = new_img_url
+                                                    sample_data["delete_img_url"] = new_del_url
+                                            
+                                            # Cập nhật Dict DB
+                                            if target_uid not in current_db:
+                                                current_db[target_uid] = {"name": reg_name, "samples": {}}
+                                            
+                                            current_db[target_uid]["updated_at"] = datetime.now(tz_VN).strftime("%Y-%m-%d %H:%M:%S")
+                                            current_db[target_uid]["samples"][sample_id] = sample_data
+                                            
+                                            save_registered_db(current_db, is_mock_db_history, history_json_path)
+                                            st.success(f"🎉 Đã lưu thành công 1 góc mặt cho: {reg_name}")
+                                            time.sleep(1.5)
+                                            st.rerun()
+                                    else:
+                                        st.error("Lỗi: Không thể đọc được dữ liệu ảnh gốc!")
 
                     # --- THÊM TÍNH NĂNG XÓA LOG & MỞ TAB XÓA ẢNH IMGBB ---
                     st.write("") # Tạo khoảng trống
@@ -871,7 +949,7 @@ else:
                     st.write("💡 *Nhấp chọn một dòng để xem ảnh và thao tác xóa:*")
                     selection = st.dataframe(
                         view_df, 
-                        width='stretch', 
+                        width='stretch',
                         hide_index=True,
                         on_select="rerun",
                         selection_mode="single-row"
