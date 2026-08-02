@@ -87,24 +87,31 @@ if "sync_initial" not in st.session_state:
 # khóa lại khi đóng cửa vật lý...) chứ không phải do web ra lệnh.
 
 if not is_mock("mock_database"):
-    # Tránh đè dữ liệu trong 3s khi người dùng vừa bấm nút trên Web
-    if time.time() - st.session_state.get("last_cmd_time", 0) > 3:
-        from firebase_manager import get_device_control
+    from firebase_manager import get_device_status, get_device_control
+    
+    # 1. ĐỌC TRẠNG THÁI THỰC TẾ (STATUS): Ưu tiên để hiển thị Giao diện
+    real_status = get_device_status()
+    if real_status:
+        # Tình trạng Chốt cửa vật lý
+        lock_val = real_status.get("lock")
+        if lock_val == "locked":
+            st.session_state.door_locked = True
+        elif lock_val == "unlocked":
+            st.session_state.door_locked = False
         
+        # Tình trạng Bóng đèn vật lý
+        light_val = real_status.get("light_inside")
+        if light_val in ("on", "off"):
+            st.session_state.light_on = (light_val == "on")
+            
+    # 2. ĐỌC TRẠNG THÁI ĐIỀU KHIỂN (CONTROL): Tránh đè nút trong 3s
+    if time.time() - st.session_state.get("last_cmd_time", 0) > 3:
         control_data = get_device_control()
         if control_data:
-            # 1. Cập nhật trạng thái Cửa
-            door_val = control_data.get("door", {}).get("value")
-            if door_val == "open":
-                st.session_state.door_locked = False
-            elif door_val == "close":
-                st.session_state.door_locked = True
-
-            # 2. Cập nhật trạng thái Đèn (Mapping ngược từ "on"/"off"/"auto" sang "Bật"/"Tắt"/"Auto")
-            light_val = control_data.get("light", {}).get("value")
+            light_val_ctrl = control_data.get("light", {}).get("value")
             mode_map_reverse = {"on": "Bật", "off": "Tắt", "auto": "Auto"}
-            if light_val in mode_map_reverse:
-                st.session_state.light_mode = mode_map_reverse[light_val]
+            if light_val_ctrl in mode_map_reverse:
+                st.session_state.light_mode = mode_map_reverse[light_val_ctrl]
 
 # ========================================================
 # CÁC HOẠT ĐỘNG NGẰM TRONG TRANG WEB 
@@ -347,7 +354,7 @@ else:
         # CỘT TRÁI (LEFT COLUMN)
         # ====================================================
         with col_left:
-            # 1. Khối Quản lý Chốt cửa (Code cũ của bạn + update biến time)
+            # 1. Khối Quản lý Chốt cửa
             st.markdown("### 🚪 Quản lý Chốt cửa")
             
             if st.session_state.door_locked:
@@ -361,10 +368,11 @@ else:
                 )
                 st.write("")
                 if st.button("🔓 Click để mở chốt từ xa", key="btn_open_door", type="primary", use_container_width=True):
-                    st.session_state.door_locked = False
-                    st.session_state.last_cmd_time = time.time()  # Quan trọng: Cập nhật thời gian gửi lệnh
+                    # BỎ DÒNG st.session_state.door_locked = False ở đây
+                    st.session_state.last_cmd_time = time.time()  
                     remote_open_door()
-                    st.toast("⚡ Lệnh rút chốt đã được gửi đến thiết bị!")
+                    # Hiển thị thông báo chờ thay vì đổi màu ngay
+                    st.toast("⚡ Đang gửi lệnh mở... Vui lòng đợi thiết bị phản hồi!")
                     time.sleep(0.5)
                     st.rerun()
             else:
@@ -378,34 +386,31 @@ else:
                 )
                 st.write("")
                 if st.button("🔒 Click để đóng chốt lại", key="btn_lock_door", type="secondary", use_container_width=True):
-                    st.session_state.door_locked = True
-                    st.session_state.last_cmd_time = time.time()  # Quan trọng: Cập nhật thời gian gửi lệnh
+                    # BỎ DÒNG st.session_state.door_locked = True ở đây
+                    st.session_state.last_cmd_time = time.time()  
                     remote_lock_door()
-                    st.toast("⚡ Lệnh đóng chốt đã được gửi đến thiết bị!")
+                    st.toast("⚡ Đang gửi lệnh đóng... Vui lòng đợi thiết bị phản hồi!")
                     time.sleep(0.5)
                     st.rerun()
 
             st.write("")
 
-            # 2. Khối Hệ thống Đèn chiếu sáng
+        # 2. Khối Hệ thống Đèn chiếu sáng
             st.markdown("### 💡 Hệ thống Đèn chiếu sáng")
 
-            if st.session_state.light_mode == "Bật":
-                light_status_str = "ĐÈN ĐANG BẬT"
-                st.info(f"💡 **TRẠNG THÁI:** {light_status_str}")
-            elif st.session_state.light_mode == "Tắt":
-                light_status_str = "ĐÈN ĐANG TẮT"
-                st.warning(f"🌑 **TRẠNG THÁI:** {light_status_str}")
+            # HIỂN THỊ Ô TRẠNG THÁI DỰA VÀO ĐỜI THỰC (light_on)
+            if st.session_state.light_on:
+                st.info("💡 **TRẠNG THÁI VẬT LÝ:** ĐÈN ĐANG SÁNG")
             else:
-                light_status_str = "TỰ ĐỘNG (THEO CẢM BIẾN)"
-                st.markdown(f"> ⚙️ **TRẠNG THÁI:** {light_status_str}")
+                st.warning("🌑 **TRẠNG THÁI VẬT LÝ:** ĐÈN ĐANG TẮT")
 
-            st.caption("Thay đổi chế độ hoạt động của đèn:")
+            # CÁC NÚT BẤM DỰA VÀO CHẾ ĐỘ ĐIỀU KHIỂN (light_mode)
+            st.caption(f"Chế độ hiện tại đang cài đặt: **{st.session_state.light_mode}**")
             c1, c2, c3 = st.columns(3)
             with c1:
                 if st.button("Bật", key="btn_light_on", use_container_width=True, type="primary" if st.session_state.light_mode == "Bật" else "secondary"):
                     st.session_state.light_mode = "Bật"
-                    st.session_state.last_cmd_time = time.time()  # Chống kẹt đèn
+                    st.session_state.last_cmd_time = time.time()
                     update_light_mode("Bật")
                     st.rerun()
             with c2:

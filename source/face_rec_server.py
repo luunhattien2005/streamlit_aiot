@@ -4,8 +4,6 @@ from datetime import datetime
 from collections import deque
 from firebase_admin import db
 
-# Import các module từ hệ thống
-
 from firebase_manager import (
     init_firebase, get_new_requests, delete_processed_request, update_ai_status,
     add_history_log, load_registered_db, check_door_alert, clear_door_alert, is_mock
@@ -13,16 +11,16 @@ from firebase_manager import (
 from telegram_bot import send_telegram_alert
 from face_engine import fetch_image_from_url, get_face_embedding, find_best_match, warmup_ai_model
 
-MAX_LOGS = 20  # Lưu tối đa 20 dòng log gần nhất
-log_queue = deque(maxlen=MAX_LOGS)
-start_time = time.time()
+MAX_LOGS = 20                           # Lưu tối đa 20 dòng log gần nhất
+log_queue = deque(maxlen=MAX_LOGS)      # Queue lưu log dạng FIFO
+start_time = time.time()                # 
 
 def add_log(message):
     """Thêm log vào queue và in ra terminal dạng text cơ bản"""
     timestamp = datetime.now().strftime("%H:%M:%S")
     log_line = f"[{timestamp}] {message}"
     log_queue.append(log_line)
-    print(log_line)  # In dòng bình thường, không gây kẹt Ctrl+C
+    print(log_line)  
 
 def sync_to_firebase(uptime_str):
     """Đẩy toàn bộ Log, Uptime và Timestamp lên Firebase để Streamlit UI đọc"""
@@ -119,7 +117,7 @@ def process_ai_recognition(registered_db):
 
 def main():
     print("\n" + "="*50)
-    print("🚀 AI SERVER ĐANG CHẠY NGẦM - NHẤN CTRL+C ĐỂ TẮT")
+    print("🚀 AI SERVER ĐANG CHẠY - NHẤN CTRL+C ĐỂ TẮT")
     print("="*50 + "\n")
     
     init_firebase()
