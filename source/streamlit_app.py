@@ -21,6 +21,7 @@ from face_engine import (fetch_image_from_url, get_face_embedding, find_best_mat
 
 init_firebase()   
 warmup_ai_model() 
+tz_VN = timezone(timedelta(hours=7))
 
 # ========================================================
 # HÀM HỖ TRỢ XỬ LÝ POP-UP IMGBB (ROLLBACK COMPONENT V1)
@@ -132,7 +133,6 @@ if door_alert:
     st.toast("🚨 CẢNH BÁO: Cửa đã mở liên tục quá 3 phút!", icon="⚠️")
     if st.session_state.telebot_mode == "Bật":
         try: 
-            tz_VN = timezone(timedelta(hours=7))
             current_alert_time = datetime.now(tz_VN).strftime('%Y-%m-%d %H:%M:%S')
             send_telegram_alert(f"🚨 CẢNH BÁO!\nThời gian: {current_alert_time}\n⚠️ Cửa phòng đã mở liên tục quá 3 phút mà chưa được đóng lại!")
         except Exception: 
@@ -605,7 +605,6 @@ else:
                                         if err:
                                             st.error(f"Thất bại: {err}")
                                         else:
-                                            tz_VN = timezone(timedelta(hours=7))
                                             sample_id = f"sample_{int(time.time())}"
                                             sample_data = {"embedding": embedding}
                                             
@@ -812,7 +811,6 @@ else:
                             if err:
                                 st.error(f"Thất bại: {err}")
                             else:
-                                tz_VN = timezone(timedelta(hours=7))
                                 current_time_str = datetime.now(tz_VN).strftime("%Y-%m-%d %H:%M:%S")
                                 safe_filename = "".join([c for c in reg_name if c.isalnum() or c in (' ', '_', '-')]).strip()
                                 sample_id = f"sample_{int(time.time())}"

@@ -59,29 +59,6 @@ def calculate_cosine_distance(source_emb, test_emb):
     b = np.array(test_emb)
     return 1 - np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
-
-
-def find_best_match_old(target_embedding, registered_db):
-    """So sánh Vector lấy được với Database đã đăng ký"""
-    if not registered_db:
-        return "Người lạ (Chưa có ai đăng ký)"
-    
-    best_match_name = "Người lạ"
-    min_distance = float("inf")
-
-    for uid, data in registered_db.items():
-        db_embedding = data.get("embedding")
-        db_name = data.get("name")
-        
-        if db_embedding:
-            distance = calculate_cosine_distance(target_embedding, db_embedding)
-            if distance < min_distance:
-                min_distance = distance
-                if distance < VGG_FACE_THRESHOLD:
-                    best_match_name = db_name
-                    
-    return best_match_name
-
 def find_best_match(target_embedding, registered_db):
     """
     So sánh Vector lấy được với Database (Cấu trúc mới: 1 người có nhiều samples).
@@ -117,8 +94,8 @@ def find_best_match(target_embedding, registered_db):
                 # Nếu khoảng cách này là nhỏ nhất từ trước tới giờ
                 if distance < min_distance:
                     min_distance = distance
-                    # Nếu vượt qua ngưỡng tin cậy của VGG-Face
-                    if distance < VGG_FACE_THRESHOLD:
+                    # Nếu vượt qua ngưỡng tin cậy của face recognition, thì coi là khớp với người đó
+                    if distance < FACENET_THRESHOLD:
                         best_match_name = db_name # Vẫn trả về tên gốc để mở cửa
 
     match_details = sorted(match_details, key=lambda x: x["Khoảng cách Cosine"])

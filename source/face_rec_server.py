@@ -1,5 +1,4 @@
 import time
-import sys
 from datetime import datetime
 from collections import deque
 from firebase_admin import db
@@ -9,7 +8,7 @@ from firebase_manager import (
     add_history_log, load_registered_db, check_door_alert, clear_door_alert, is_mock
 )
 from telegram_bot import send_telegram_alert
-from face_engine import fetch_image_from_url, get_face_embedding, find_best_match, warmup_ai_model, VGG_FACE_THRESHOLD
+from face_engine import fetch_image_from_url, get_face_embedding, find_best_match, warmup_ai_model, FACENET_THRESHOLD, VGG_FACE_THRESHOLD
 
 MAX_LOGS = 15                           # Lưu tối đa 15 dòng log gần nhất
 log_queue = deque(maxlen=MAX_LOGS)      # Queue lưu log dạng FIFO
@@ -100,7 +99,7 @@ def process_ai_recognition(registered_db):
                             if not err and embedding is not None:
 
                                 best_name, min_dist, similarity, _ = find_best_match(embedding, registered_db)
-                                threshold_percent = (1.0 - VGG_FACE_THRESHOLD) * 100
+                                threshold_percent = (1.0 - FACENET_THRESHOLD) * 100
 
                                 if "Người lạ" not in best_name:
                                     update_ai_status("known") 
