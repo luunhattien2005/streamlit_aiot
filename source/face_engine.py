@@ -4,11 +4,11 @@ import cv2
 import numpy as np
 from deepface import DeepFace
 
-# Ngưỡng (Threshold) chuẩn của model VGG-Face dùng Cosine
 VGG_FACE_THRESHOLD = 0.40 
-FACENET_THRESHOLD  = 0.40
+FACENET_THRESHOLD  = 0.33
 
 def fetch_image_from_url(url):
+    """Tải ảnh từ URL và trả về ảnh OpenCV"""
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
@@ -25,22 +25,21 @@ def get_face_embedding(img):
     if img is None or img.size == 0:
         return None, None, "Ảnh tải lên không hợp lệ hoặc bị rỗng!"
     try:
-        ### Lấy representation (vector) thay vì tự so sánh
         #Mô hình VGG-Face
-        res = DeepFace.represent(
-            img_path=img, 
-            model_name="VGG-Face", 
-            enforce_detection=True,
-            detector_backend="mtcnn"
-        )
-
-        # Mô hình Facenet
         # res = DeepFace.represent(
         #     img_path=img, 
-        #     model_name="Facenet", 
+        #     model_name="VGG-Face", 
         #     enforce_detection=True,
-        #     detector_backend="ssd"
+        #     detector_backend="mtcnn"
         # )
+
+        # Mô hình Facenet
+        res = DeepFace.represent(
+            img_path=img, 
+            model_name="Facenet", 
+            enforce_detection=True,
+            detector_backend="mtcnn" # ssd
+        )
 
         if len(res) > 0:
             embedding = res[0]["embedding"]
@@ -55,7 +54,7 @@ def get_face_embedding(img):
 
 
 def calculate_cosine_distance(source_emb, test_emb):
-    """Tính toán khoảng cách Cosine chuẩn chỉnh"""
+    """Tính toán khoảng cách Cosine"""
     a = np.array(source_emb)
     b = np.array(test_emb)
     return 1 - np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
@@ -101,7 +100,7 @@ def find_best_match(target_embedding, registered_db):
         db_name = user_data.get("name", "Không tên")
         samples = user_data.get("samples", {})
         
-        # Lặp qua từng mẫu ảnh (góc mặt) của người đó
+        # Lặp qua từng mẫu ảnh của người đó
         for sample_id, sample_data in samples.items():
             db_embedding = sample_data.get("embedding")
             
@@ -136,19 +135,19 @@ def warmup_ai_model():
     # Ép DeepFace chạy trước một lần, bỏ qua bước check khuôn mặt thật
     try:
         #Mô hình VGG-Face
-        DeepFace.represent(
-            img_path=dummy_img, 
-            model_name="VGG-Face", 
-            enforce_detection=True,
-            detector_backend="mtcnn"
-        )
-
-        # Mô hình Facenet
         # DeepFace.represent(
         #     img_path=dummy_img, 
-        #     model_name="Facenet", 
+        #     model_name="VGG-Face", 
         #     enforce_detection=True,
-        #     detector_backend="ssd"
+        #     detector_backend="mtcnn"
         # )
+
+        # Mô hình Facenet
+        DeepFace.represent(
+            img_path=dummy_img, 
+            model_name="Facenet", 
+            enforce_detection=True,
+            detector_backend="mtcnn" # ssd
+        )
     except Exception:
         pass

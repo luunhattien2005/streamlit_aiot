@@ -134,76 +134,10 @@ if door_alert:
         try: 
             tz_VN = timezone(timedelta(hours=7))
             current_alert_time = datetime.now(tz_VN).strftime('%Y-%m-%d %H:%M:%S')
-            send_telegram_alert(f"🚨 CẢNH BÁO AN NINH!\nThời gian: {current_alert_time}\n⚠️ Cửa phòng đã mở liên tục quá 3 phút mà chưa được đóng lại!")
+            send_telegram_alert(f"🚨 CẢNH BÁO!\nThời gian: {current_alert_time}\n⚠️ Cửa phòng đã mở liên tục quá 3 phút mà chưa được đóng lại!")
         except Exception: 
             pass
-    clear_door_alert() # Dọn dẹp cờ cảnh báo trên Database sau khi xử lý xong
-
-# if isinstance(new_requests, dict) and new_requests:
-#     for req_id, req_data in new_requests.items():
-#         if isinstance(req_data, dict) and req_data.get("status") == "pending":
-#             img_url = req_data.get("image_url")
-#             del_url = req_data.get("delete_img_url", "")
-#             req_time = req_data.get("timestamp", int(time.time()))
-#             time_str = datetime.fromtimestamp(req_time).strftime("%Y-%m-%d %H:%M:%S") if isinstance(req_time, (int, float)) else str(req_time)
-
-#             if img_url:
-#                 update_ai_status("pending") # Báo mạch kêu 1 bíp ngắn
-#                 opencv_img, fetch_err = fetch_image_from_url(img_url)
-
-#                 if opencv_img is not None:
-#                     has_samples = any(udata.get("samples") for udata in registered_db.values() if isinstance(udata, dict)) if isinstance(registered_db, dict) else False
-#                     log_id = f"log_{req_time}"
-
-#                     # TH1: CSDL Trống
-#                     if not has_samples:
-#                         update_ai_status("unknown") # CSDL trống -> Hú 5 tiếng
-#                         st.toast("🚨 CẢNH BÁO: CSDL trống! Không thể nhận diện (Người lạ)", icon="⚠️")
-                        
-#                         add_history_log(log_id, {
-#                             "timestamp": time_str, "person_name": "Người lạ", 
-#                             "action": "Từ chối mở cửa (CSDL chưa có dữ liệu)", "image_url": img_url, "delete_img_url": del_url
-#                         })
-#                         if st.session_state.telebot_mode == "Bật":
-#                             try: send_telegram_alert(f"🚨 CẢNH BÁO NGƯỜI LẠ!\nThời gian: {time_str}\n⚠️ Kho dữ liệu CSDL hiện tại đang trống!", image_url=img_url)
-#                             except Exception: pass
-#                         delete_processed_request(req_id)
-                        
-#                     # TH2: Có CSDL
-#                     else:
-#                         embedding, bbox, err = get_face_embedding(opencv_img)
-#                         if not err and embedding is not None:
-#                             best_name, min_dist, similarity, _ = find_best_match(embedding, registered_db)
-                            
-#                             if "Người lạ" not in best_name:
-#                                 update_ai_status("known") # Người quen -> Kêu 2 bíp, mở cửa
-#                                 st.session_state.door_locked = False
-#                                 st.toast(f"🔓 Đã mở cửa cho: {best_name} ({similarity:.1f}%)")
-#                                 add_history_log(log_id, {
-#                                     "timestamp": time_str, "person_name": best_name, 
-#                                     "action": f"Mở cửa thành công ({similarity:.1f}%)", "image_url": img_url, "delete_img_url": del_url
-#                                 })
-#                                 delete_processed_request(req_id)
-#                             else:
-#                                 update_ai_status("unknown") # Người lạ -> Hú 5 tiếng
-#                                 st.toast("🚨 CẢNH BÁO: Phát hiện người lạ trước cửa!", icon="⚠️")
-#                                 add_history_log(log_id, {
-#                                     "timestamp": time_str, "person_name": "Người lạ", 
-#                                     "action": "Từ chối mở cửa", "image_url": img_url, "delete_img_url": del_url
-#                                 })
-#                                 if st.session_state.telebot_mode == "Bật":
-#                                     try: send_telegram_alert(f"🚨 CẢNH BÁO NGƯỜI LẠ!\nThời gian: {time_str}\nPhát hiện người lạ trước cửa.", image_url=img_url)
-#                                     except Exception: pass
-#                                 delete_processed_request(req_id)
-                        
-#                         # BỔ SUNG ĐOẠN ELSE NÀY ĐỂ VÁ LỖI
-#                         else:
-#                             st.toast("⚠️ Ảnh lỗi hoặc không tìm thấy khuôn mặt, đã tự động hủy!", icon="🗑️")
-#                             delete_processed_request(req_id) # Bắt buộc phải chém bỏ request rác
-#                 time.sleep(2) 
-#                 update_ai_status("idle") # Trả hệ thống về trạng thái chờ
-
-    
+    clear_door_alert() # Dọn dẹp cờ cảnh báo trên Database sau khi xử lý xong    
 
     
 # --- DIỆN MẠO 1: TRANG ĐĂNG NHẬP ---
@@ -356,8 +290,8 @@ else:
         # CỘT TRÁI (LEFT COLUMN)
         # ====================================================
         with col_left:
-            # 1. Khối Quản lý Chốt cửa
-            st.markdown("### 🚪 Quản lý Chốt cửa")
+            # 1. Khối Quản lý chốt cửa
+            st.markdown("### 🚪 Quản lý chốt cửa")
             
             if st.session_state.door_locked:
                 st.markdown(
@@ -369,7 +303,7 @@ else:
                     """, unsafe_allow_html=True
                 )
                 st.write("")
-                if st.button("🔓 Click để mở chốt từ xa", key="btn_open_door", type="primary", use_container_width=True):
+                if st.button("🔓 Click để mở chốt", key="btn_open_door", type="primary", use_container_width=True):
                     # BỎ DÒNG st.session_state.door_locked = False ở đây
                     st.session_state.last_cmd_time = time.time()  
                     remote_open_door()
@@ -387,7 +321,7 @@ else:
                     """, unsafe_allow_html=True
                 )
                 st.write("")
-                if st.button("🔒 Click để đóng chốt lại", key="btn_lock_door", type="secondary", use_container_width=True):
+                if st.button("🔒 Click để đóng chốt", key="btn_lock_door", type="secondary", use_container_width=True):
                     # BỎ DÒNG st.session_state.door_locked = True ở đây
                     st.session_state.last_cmd_time = time.time()  
                     remote_lock_door()
@@ -397,14 +331,14 @@ else:
 
             st.write("")
 
-        # 2. Khối Hệ thống Đèn chiếu sáng
-            st.markdown("### 💡 Hệ thống Đèn chiếu sáng")
+        # 2. Khối hệ thống đèn chiếu sáng
+            st.markdown("### 💡 Hệ thống đèn chiếu sáng")
 
             # HIỂN THỊ Ô TRẠNG THÁI DỰA VÀO ĐỜI THỰC (light_on)
             if st.session_state.light_on:
-                st.info("💡 **TRẠNG THÁI VẬT LÝ:** ĐÈN ĐANG SÁNG")
+                st.info("💡 **TRẠNG THÁI:** ĐÈN ĐANG SÁNG")
             else:
-                st.warning("🌑 **TRẠNG THÁI VẬT LÝ:** ĐÈN ĐANG TẮT")
+                st.warning("🌑 **TRẠNG THÁI:** ĐÈN ĐANG TẮT")
 
             # CÁC NÚT BẤM DỰA VÀO CHẾ ĐỘ ĐIỀU KHIỂN (light_mode)
             st.caption(f"Chế độ hiện tại đang cài đặt: **{st.session_state.light_mode}**")
@@ -461,7 +395,7 @@ else:
             st.write("")
 
             # 2. Khối Trạng thái AI Server
-            st.markdown("### 🖥️ Trạng thái AI Server")
+            st.markdown("### 🖥️ Trạng thái server nhận dạng")
             with st.container(border=True):
                 st_col1, st_col2 = st.columns([1, 1], vertical_alignment="center")
                 with st_col1:
@@ -501,7 +435,7 @@ else:
         st.markdown("<h2 style='text-align: left;'>📷 Test gửi ảnh lên Firebase (Giả lập ESP32-CAM)</h2>", unsafe_allow_html=True)
         st.write("")
         
-        esp_file = st.file_uploader("Tải ảnh quét khuôn mặt:", type=["jpg", "jpeg", "png"])
+        esp_file = st.file_uploader("Chọn ảnh chứa khuôn mặt:", type=["jpg", "jpeg", "png"])
         
         if st.button("🚀 Mô phỏng gửi từ ESP32", type="primary"):
             if esp_file is not None:
@@ -742,11 +676,11 @@ else:
         registered_db, is_mock_db, JSON_PATH = load_registered_db()
         DB_DIR = "./source/Face_Database"
 
-        # Hiển thị chế độ dữ liệu đang dùng
+        # Hiển thị nguồn dữ liệu đang dùng
         if is_mock_db:
-            st.caption("🟡 **Chế độ:** Local Mock (`registered_db.json`)")
+            st.caption("🟡 **Nguồn:** Local Mock (`registered_db.json`)")
         else:
-            st.caption("🟢 **Chế độ:** Firebase Realtime Database (`/registered`)")
+            st.caption("🟢 **Nguồn:** Firebase Realtime Database (`/registered`)")
             
 
         # Chia giao diện thành 2 chức năng 
@@ -763,10 +697,10 @@ else:
         # CHỨC NĂNG 1: KIỂM TRA DỮ LIỆU ẢNH (NHẬN DIỆN THỬ)
         # ====================================================
         if db_action == "🔍 Kiểm tra nhận diện":
-            st.markdown("### 🔍 Test thử tính năng nhận diện khuôn mặt")
-            st.write("Tải lên một bức ảnh bất kỳ để kiểm tra xem AI có nhận diện được là người quen hay không.")
+            st.markdown("### 🔍 Nhận diện khuôn mặt")
+            st.write("Tải lên một bức ảnh để kiểm tra xem mô hình có nhận diện được không.")
             
-            test_file = st.file_uploader("Chọn ảnh kiểm tra...", type=["jpg", "jpeg", "png"], key="test_face_upload")
+            test_file = st.file_uploader("Chọn ảnh kiểm tra", type=["jpg", "jpeg", "png"], key="test_face_upload")
             
             if test_file is not None:
                 file_bytes = np.asarray(bytearray(test_file.read()), dtype=np.uint8)

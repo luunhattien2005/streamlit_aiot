@@ -11,7 +11,7 @@ from firebase_manager import (
 from telegram_bot import send_telegram_alert
 from face_engine import fetch_image_from_url, get_face_embedding, find_best_match, warmup_ai_model, VGG_FACE_THRESHOLD
 
-MAX_LOGS = 20                           # Lưu tối đa 20 dòng log gần nhất
+MAX_LOGS = 15                           # Lưu tối đa 15 dòng log gần nhất
 log_queue = deque(maxlen=MAX_LOGS)      # Queue lưu log dạng FIFO
 start_time = time.time()                # 
 
@@ -55,7 +55,7 @@ def process_ai_recognition(registered_db):
     if check_door_alert():
         add_log("🚨 CẢNH BÁO: Cửa mở quá 3 phút!")
         try:
-            send_telegram_alert("🚨 CẢNH BÁO AN NINH!\n⚠️ Cửa phòng đã mở liên tục quá 3 phút!")
+            send_telegram_alert("🚨 CẢNH BÁO!\n⚠️ Cửa phòng đã mở liên tục quá 3 phút!")
         except Exception:
             pass
         clear_door_alert()
@@ -83,7 +83,7 @@ def process_ai_recognition(registered_db):
                             add_log("❌ CSDL trống! Từ chối mở cửa.")
                             add_history_log(log_id, {
                                 "timestamp": time_str, "person_name": "Người lạ", 
-                                "action": "Từ chối mở cửa (CSDL rỗng)", "image_url": img_url, "delete_img_url": del_url
+                                "action": "Từ chối (CSDL rỗng)", "image_url": img_url, "delete_img_url": del_url
                             })
 
                             try:
@@ -126,7 +126,7 @@ def process_ai_recognition(registered_db):
 
                                     # Gửi Telegram
                                     try:
-                                        msg = f"🚨 *CẢNH BÁO AN NINH* 🚨\nPhát hiện người lạ cố gắng mở cửa lúc {time_str}!\nĐộ nhận diện: {similarity:.1f}% (Ngưỡng yêu cầu: {threshold_percent:.1f}%)"
+                                        msg = f"🚨 *CẢNH BÁO* 🚨\nPhát hiện người lạ lúc {time_str}!\nĐộ nhận diện: {similarity:.1f}% (Ngưỡng yêu cầu: {threshold_percent:.1f}%)"
                                         send_telegram_alert(msg, image_url=img_url)
                                     except Exception:
                                         pass
@@ -142,13 +142,13 @@ def process_ai_recognition(registered_db):
 
 def main():
     print("\n" + "="*50)
-    print("🚀 AI SERVER ĐANG CHẠY - NHẤN CTRL+C ĐỂ TẮT")
+    print("🚀 FACE RECOGNITION SERVER ĐANG CHẠY - NHẤN CTRL+C ĐỂ TẮT")
     print("="*50 + "\n")
     
     init_firebase()
     add_log("📡 Đã kết nối Firebase.")
     warmup_ai_model()
-    add_log("🤖 AI Model khởi động xong. Sẵn sàng!")
+    add_log("🤖 AI Model khởi động xong.")
     
     # Set default refresh rate = 3.0 nếu chưa có
     if not is_mock("mock_database") and db.reference('server_status/refresh_rate').get() is None:
@@ -162,8 +162,8 @@ def main():
 
     while True:
         try:
-            # Quét DB mỗi 15 giây hoặc khi DB đang trống
-            if time.time() - last_db_check > 15 or not registered_db:
+            # Quét DB mỗi 30 giây hoặc khi DB đang trống
+            if time.time() - last_db_check > 30 or not registered_db:
                 new_db, _, _ = load_registered_db()
                 last_db_check = time.time()
                 
@@ -196,7 +196,7 @@ def main():
             minutes, seconds = divmod(remainder, 60)
             uptime_str = f"{hours:02d}h {minutes:02d}m {seconds:02d}s"
 
-            # Đẩy mọi thứ lên Firebase để UI vẽ ra
+            # Đẩy mọi thứ lên Firebase để UI cập nhật
             sync_to_firebase(uptime_str)
             
             time.sleep(current_rate)
