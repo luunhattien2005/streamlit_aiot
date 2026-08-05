@@ -217,6 +217,6 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-source/Face_Database
-source/Face_Test
+Face_Database
+Face_Test
 *.rar
