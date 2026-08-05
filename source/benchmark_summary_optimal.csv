@@ -1,0 +1,5 @@
+﻿Detector,Model,Ngưỡng tối ưu,Balanced Acc (%),FAR (%),FRR (%),Lỗi Detect,Thời gian (s)
+mtcnn,Facenet512,0.32,98.95,0.0,2.44,0,123.58
+mtcnn,ArcFace,0.5,93.95,0.0,4.88,0,132.97
+mtcnn,SFace,0.52,85.86,2.94,9.76,0,85.38
+mtcnn,Facenet,0.34,77.75,2.94,21.95,0,139.56

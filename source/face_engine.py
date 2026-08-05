@@ -33,10 +33,10 @@ def get_face_embedding(img):
         #     detector_backend="mtcnn"
         # )
 
-        # Mô hình Facenet
+        # Mô hình Facenet512
         res = DeepFace.represent(
             img_path=img, 
-            model_name="Facenet", 
+            model_name="Facenet512", 
             enforce_detection=True,
             detector_backend="mtcnn" # ssd
         )
@@ -119,10 +119,10 @@ def warmup_ai_model():
         #     detector_backend="mtcnn"
         # )
 
-        # Mô hình Facenet
+        # Mô hình Facenet512
         DeepFace.represent(
             img_path=dummy_img, 
-            model_name="Facenet", 
+            model_name="Facenet512", 
             enforce_detection=True,
             detector_backend="mtcnn" # ssd
         )
