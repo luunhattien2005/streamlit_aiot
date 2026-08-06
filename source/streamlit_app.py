@@ -137,8 +137,17 @@ def cb_register_face(name, file_obj, target_uid, reg_db, is_mock, json_path):
         st.toast("⚠️ Vui lòng tải ảnh lên!")
         return
 
+    file_obj.seek(0)  # Đảm bảo con trỏ file ở đầu
+
+
     file_bytes = np.asarray(bytearray(file_obj.read()), dtype=np.uint8)
-    opencv_img = cv2.cvtColor(cv2.imdecode(file_bytes, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+    img_decoded = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+
+    if img_decoded is None:
+        st.toast("❌ Lỗi: Không thể đọc được dữ liệu ảnh tải lên!")
+        return
+
+    opencv_img = cv2.cvtColor(img_decoded, cv2.COLOR_BGR2RGB)
     embedding, bbox, err = get_face_embedding(opencv_img)
     if err:
         st.toast(f"❌ Thất bại: {err}")
