@@ -19,6 +19,190 @@ from firebase_manager import (
 from telegram_bot import send_telegram_alert
 from face_engine import (fetch_image_from_url, get_face_embedding, find_best_match, warmup_ai_model)
 
+# --- CÁC HÀM CALLBACK XỬ LÝ SỰ KIỆN NÚT BẤM ---
+
+def cb_toggle_pw():
+    st.session_state.show_change_pw = not st.session_state.get("show_change_pw", False)
+
+def cb_logout():
+    st.session_state.logged_in = False
+    st.session_state.show_change_pw = False
+
+def cb_control_door(action):
+    st.session_state.last_cmd_time = time.time()
+    if action == "open":
+        remote_open_door()
+        st.toast("⚡ Đang gửi lệnh mở... Vui lòng đợi thiết bị phản hồi!")
+    else:
+        remote_lock_door()
+        st.toast("⚡ Đang gửi lệnh đóng... Vui lòng đợi thiết bị phản hồi!")
+    time.sleep(0.5)
+
+def cb_set_light_mode(mode):
+    st.session_state.light_mode = mode
+    st.session_state.last_cmd_time = time.time()
+    update_light_mode(mode)
+
+def cb_set_telebot_mode(mode):
+    st.session_state.telebot_mode = mode
+    update_telebot_db(mode)
+
+def cb_change_keypad_pass(pass_val):
+    if pass_val.isdigit():
+        if change_keypad_password(pass_val):
+            st.toast("✅ Đã cập nhật mật khẩu Keypad mới!", icon="🔑")
+        else:
+            st.toast("❌ Không thể kết nối Database!", icon="🚨")
+    else:
+        st.toast("⚠️ Vui lòng chỉ nhập chuỗi chữ số!", icon="⚠️")
+
+def cb_save_refresh_rate(rate_val):
+    if not is_mock("mock_database"):
+        from firebase_admin import db
+        db.reference('server_status/refresh_rate').set(rate_val)
+        st.toast(f"✅ Đã đổi chu kỳ quét: {rate_val}s")
+    else:
+        st.toast("⚠️ Đang ở chế độ Mock!")
+
+def cb_simulate_esp32(file_obj):
+    if file_obj is None:
+        st.toast("⚠️ Bạn phải chọn ảnh trước!")
+        return
+    import base64, requests
+    IMGBB_API_KEY = st.secrets["imgbb"]["api_key"]
+    encoded_img = base64.b64encode(file_obj.read()).decode('utf-8')
+    payload = {"key": IMGBB_API_KEY, "image": encoded_img}
+    res = requests.post("https://api.imgbb.com/1/upload", data=payload)
+    if res.status_code == 200:
+        data = res.json()["data"]
+        from firebase_manager import push_esp32_mock_request
+        req_id = push_esp32_mock_request(data["url"], data["delete_url"], data["time"])
+        st.toast(f"✅ Đã tạo Request [{req_id}] trên Firebase!")
+    else:
+        st.toast("❌ Lỗi upload ImgBB!")
+
+def cb_save_hist_image(name, path_or_url, target_uid, current_db, is_mock, json_path):
+    if not name.strip():
+        st.toast("⚠️ Vui lòng nhập/chọn tên!")
+        return
+    opencv_img = None
+    if path_or_url.startswith("http"):
+        opencv_img, fetch_err = fetch_image_from_url(path_or_url)
+        if opencv_img is not None: opencv_img = cv2.cvtColor(opencv_img, cv2.COLOR_BGR2RGB)
+    elif os.path.exists(path_or_url):
+        opencv_img = cv2.imread(path_or_url)
+        if opencv_img is not None: opencv_img = cv2.cvtColor(opencv_img, cv2.COLOR_BGR2RGB)
+
+    if opencv_img is None:
+        st.toast("❌ Lỗi: Không thể đọc được dữ liệu ảnh gốc!")
+        return
+
+    embedding, bbox, err = get_face_embedding(opencv_img)
+    if err:
+        st.toast(f"❌ Thất bại: {err}")
+        return
+
+    sample_id = f"sample_{int(time.time())}"
+    sample_data = {"embedding": embedding}
+    if is_mock:
+        safe_filename = "".join([c for c in name if c.isalnum() or c in (' ', '_', '-')]).strip()
+        filename = f"{safe_filename}_{sample_id}.jpg"
+        cv2.imwrite(os.path.join("./source/Face_Database", filename), cv2.cvtColor(opencv_img, cv2.COLOR_RGB2BGR))
+        sample_data["image_path"] = filename
+    else:
+        new_img_url, new_del_url = upload_to_imgbb(opencv_img)
+        if new_img_url:
+            sample_data["image_url"] = new_img_url
+            sample_data["delete_img_url"] = new_del_url
+
+    if target_uid not in current_db:
+        current_db[target_uid] = {"name": name, "samples": {}}
+    current_db[target_uid]["updated_at"] = datetime.now(tz_VN).strftime("%Y-%m-%d %H:%M:%S")
+    current_db[target_uid]["samples"][sample_id] = sample_data
+    save_registered_db(current_db, is_mock, json_path)
+    st.toast(f"🎉 Đã lưu thành công 1 góc mặt cho: {name}")
+
+def cb_delete_history_log(log_id, delete_url):
+    from firebase_manager import delete_history_log
+    delete_history_log(log_id)
+    if delete_url:
+        open_urls_in_new_tabs(delete_url)
+    st.toast("🗑️ Đã dọn dẹp nhật ký!")
+
+def cb_register_face(name, file_obj, target_uid, reg_db, is_mock, json_path):
+    if not name.strip():
+        st.toast("⚠️ Vui lòng nhập/chọn tên!")
+        return
+    if file_obj is None:
+        st.toast("⚠️ Vui lòng tải ảnh lên!")
+        return
+
+    file_bytes = np.asarray(bytearray(file_obj.read()), dtype=np.uint8)
+    opencv_img = cv2.cvtColor(cv2.imdecode(file_bytes, cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+    embedding, bbox, err = get_face_embedding(opencv_img)
+    if err:
+        st.toast(f"❌ Thất bại: {err}")
+        return
+
+    current_time_str = datetime.now(tz_VN).strftime("%Y-%m-%d %H:%M:%S")
+    safe_filename = "".join([c for c in name if c.isalnum() or c in (' ', '_', '-')]).strip()
+    sample_id = f"sample_{int(time.time())}"
+    sample_data = {"embedding": embedding}
+
+    if is_mock:
+        filename = f"{safe_filename}_{sample_id}.jpg"
+        cv2.imwrite(os.path.join(DB_DIR, filename), cv2.cvtColor(opencv_img, cv2.COLOR_RGB2BGR))
+        sample_data["image_path"] = filename
+    else:
+        img_url, del_url = upload_to_imgbb(opencv_img)
+        if img_url:
+            sample_data["image_url"] = img_url
+            sample_data["delete_img_url"] = del_url
+        else:
+            st.toast("❌ Không thể upload ảnh lên ImgBB!")
+            return
+
+    if target_uid not in reg_db or not isinstance(reg_db[target_uid], dict):
+        reg_db[target_uid] = {"name": name, "samples": {}}
+    reg_db[target_uid]["updated_at"] = current_time_str
+    if "samples" not in reg_db[target_uid]:
+        reg_db[target_uid]["samples"] = {}
+    reg_db[target_uid]["samples"][sample_id] = sample_data
+
+    save_registered_db(reg_db, is_mock, json_path)
+    st.toast(f"🎉 Đã lưu thành công 1 góc mặt cho: {name}")
+
+def cb_delete_single_sample(uid, sid, filename, imgbb_url):
+    if filename:
+        p = os.path.join(DB_DIR, filename)
+        if os.path.exists(p): os.remove(p)
+    if imgbb_url and imgbb_url.startswith("http"):
+        open_urls_in_new_tabs(imgbb_url)
+    if sid in registered_db.get(uid, {}).get("samples", {}):
+        del registered_db[uid]["samples"][sid]
+    if not registered_db.get(uid, {}).get("samples"):
+        if uid in registered_db: del registered_db[uid]
+    save_registered_db(registered_db, is_mock_db, JSON_PATH)
+    st.toast("🗑️ Đã xóa 1 ảnh thành công!")
+
+def cb_delete_entire_user(uid, name):
+    del_urls = []
+    for sid, sinfo in registered_db.get(uid, {}).get("samples", {}).items():
+        f_name = sinfo.get("image_path")
+        if f_name:
+            p = os.path.join(DB_DIR, f_name)
+            if os.path.exists(p): os.remove(p)
+        d_url = sinfo.get("delete_img_url")
+        if d_url and d_url.startswith("http"):
+            del_urls.append(d_url)
+    if del_urls:
+        open_urls_in_new_tabs(del_urls)
+    if uid in registered_db:
+        del registered_db[uid]
+    save_registered_db(registered_db, is_mock_db, JSON_PATH)
+    st.toast(f"🎉 Đã xóa toàn bộ hồ sơ của {name}!")
+
+
 init_firebase()   
 warmup_ai_model() 
 tz_VN = timezone(timedelta(hours=7))
@@ -176,14 +360,9 @@ else:
         st.markdown("<h1 class='sidebar-title'>Cài đặt</h1>", unsafe_allow_html=True)
         st.markdown(f"<h1 class='sidebar-admin'>Tài khoản: {st.session_state.main_username}</h1>", unsafe_allow_html=True)
 
-        if st.button("Thay đổi mật khẩu", type="primary", key="change-btn", width='stretch'):
-            st.session_state.show_change_pw = not st.session_state.show_change_pw
-            st.rerun() 
+        st.button("Thay đổi mật khẩu", type="primary", key="change-btn", width='stretch', on_click=cb_toggle_pw)
 
-        if st.button("Đăng xuất", type="primary", key="logout-btn", width='stretch'):
-            st.session_state.logged_in = False
-            st.session_state.show_change_pw = False 
-            st.rerun()
+        st.button("Đăng xuất", type="primary", key="logout-btn", width='stretch', on_click=cb_logout)
 
         st.write("---")
         st.markdown("### ⚙️ Hệ thống tự động")
@@ -303,14 +482,8 @@ else:
                     """, unsafe_allow_html=True
                 )
                 st.write("")
-                if st.button("🔓 Click để mở chốt", key="btn_open_door", type="primary", use_container_width=True):
-                    # BỎ DÒNG st.session_state.door_locked = False ở đây
-                    st.session_state.last_cmd_time = time.time()  
-                    remote_open_door()
-                    # Hiển thị thông báo chờ thay vì đổi màu ngay
-                    st.toast("⚡ Đang gửi lệnh mở... Vui lòng đợi thiết bị phản hồi!")
-                    time.sleep(0.5)
-                    st.rerun()
+                st.button("🔓 Click để mở chốt", key="btn_open_door", type="primary", width='stretch', on_click=cb_control_door, args=("open",))
+
             else:
                 st.markdown(
                     """
@@ -321,13 +494,8 @@ else:
                     """, unsafe_allow_html=True
                 )
                 st.write("")
-                if st.button("🔒 Click để đóng chốt", key="btn_lock_door", type="secondary", use_container_width=True):
-                    # BỎ DÒNG st.session_state.door_locked = True ở đây
-                    st.session_state.last_cmd_time = time.time()  
-                    remote_lock_door()
-                    st.toast("⚡ Đang gửi lệnh đóng... Vui lòng đợi thiết bị phản hồi!")
-                    time.sleep(0.5)
-                    st.rerun()
+                st.button("🔒 Click để đóng chốt", key="btn_lock_door", type="secondary", width='stretch', on_click=cb_control_door, args=("close",))
+
 
             st.write("")
 
@@ -344,36 +512,23 @@ else:
             st.caption(f"Chế độ hiện tại đang cài đặt: **{st.session_state.light_mode}**")
             c1, c2, c3 = st.columns(3)
             with c1:
-                if st.button("Bật", key="btn_light_on", use_container_width=True, type="primary" if st.session_state.light_mode == "Bật" else "secondary"):
-                    st.session_state.light_mode = "Bật"
-                    st.session_state.last_cmd_time = time.time()
-                    update_light_mode("Bật")
-                    st.rerun()
+                st.button("Bật", key="btn_light_on", width='stretch', type="primary" if st.session_state.light_mode == "Bật" else "secondary", on_click=cb_set_light_mode, args=("Bật",))
+
             with c2:
-                if st.button("Tắt", key="btn_light_off", use_container_width=True, type="primary" if st.session_state.light_mode == "Tắt" else "secondary"):
-                    st.session_state.light_mode = "Tắt"
-                    st.session_state.last_cmd_time = time.time()
-                    update_light_mode("Tắt")
-                    st.rerun()
+                st.button("Tắt", key="btn_light_off", width='stretch', type="primary" if st.session_state.light_mode == "Tắt" else "secondary", on_click=cb_set_light_mode, args=("Tắt",))
+
             with c3:
-                if st.button("Auto", key="btn_light_auto", use_container_width=True, type="primary" if st.session_state.light_mode == "Auto" else "secondary"):
-                    st.session_state.light_mode = "Auto"
-                    st.session_state.last_cmd_time = time.time()
-                    update_light_mode("Auto")
-                    st.rerun()
+                st.button("Auto", key="btn_light_auto", width='stretch', type="primary" if st.session_state.light_mode == "Auto" else "secondary", on_click=cb_set_light_mode, args=("Auto",))
+
 
             st.caption("Bật thông báo thông qua Telebot:")
             tb1, tb2 = st.columns(2)
             with tb1:
-                if st.button("Bật", key="btn_tele_on", use_container_width=True, type="primary" if st.session_state.telebot_mode == "Bật" else "secondary"):
-                    st.session_state.telebot_mode = "Bật"
-                    update_telebot_db("Bật")
-                    st.rerun()
+                st.button("Bật", key="btn_tele_on", width='stretch', type="primary" if st.session_state.telebot_mode == "Bật" else "secondary", on_click=cb_set_telebot_mode, args=("Bật",))
+
             with tb2:
-                if st.button("Tắt", key="btn_tele_off", use_container_width=True, type="primary" if st.session_state.telebot_mode == "Tắt" else "secondary"):
-                    st.session_state.telebot_mode = "Tắt"
-                    update_telebot_db("Tắt")
-                    st.rerun()
+                st.button("Tắt", key="btn_tele_off", width='stretch', type="primary" if st.session_state.telebot_mode == "Tắt" else "secondary", on_click=cb_set_telebot_mode, args=("Tắt",))
+
 
         # ====================================================
         # CỘT PHẢI (RIGHT COLUMN)
@@ -383,14 +538,8 @@ else:
             st.markdown("### 🔑 Đổi mật khẩu cửa (Keypad)")
             with st.container(border=True):
                 new_keypad_pass = st.text_input("Mật khẩu Keypad mới:", type="password", placeholder="Nhập số (VD: 789)...")
-                if st.button("Cập nhật vào bộ nhớ mạch", use_container_width=True):
-                    if new_keypad_pass.isdigit():
-                        if change_keypad_password(new_keypad_pass):
-                            st.toast("✅ Đã cập nhật mật khẩu Keypad mới!", icon="🔑")
-                        else:
-                            st.error("Không thể kết nối Database!")
-                    else:
-                        st.warning("Vui lòng chỉ nhập chuỗi chữ số!")
+                st.button("Cập nhật vào bộ nhớ mạch", width='stretch', on_click=cb_change_keypad_pass, args=(new_keypad_pass,), type="primary")
+
 
             st.write("")
 
@@ -417,15 +566,8 @@ else:
                         key="compact_refresh_rate"
                     )
                 with rf_col2:
-                    if st.button("Lưu", type="primary", use_container_width=True, key="compact_save_rate"):
-                        if not is_mock("mock_database"):
-                            from firebase_admin import db
-                            db.reference('server_status/refresh_rate').set(new_rate)
-                            st.toast(f"✅ Đã đổi chu kỳ quét: {new_rate}s")
-                            time.sleep(0.5)
-                            st.rerun()
-                        else:
-                            st.warning("Đang ở chế độ Mock!")
+                    st.button("Lưu", type="primary", width='stretch', key="compact_save_rate", on_click=cb_save_refresh_rate, args=(new_rate,))
+
 
     # ----------------------------------------------------
     # TAB 2: DEV TEST NEW REQ 
@@ -437,41 +579,7 @@ else:
         
         esp_file = st.file_uploader("Chọn ảnh chứa khuôn mặt:", type=["jpg", "jpeg", "png"])
         
-        if st.button("🚀 Mô phỏng gửi từ ESP32", type="primary"):
-            if esp_file is not None:
-                with st.spinner("Đang up ảnh lên ImgBB & gửi new req vào Firebase..."):
-                    import base64
-                    import requests
-                    
-                    # 1. API Gửi ảnh lên ImgBB
-                    IMGBB_API_KEY = st.secrets["imgbb"]["api_key"]
-                    encoded_img = base64.b64encode(esp_file.read()).decode('utf-8')
-                    
-                    payload = {
-                        "key": IMGBB_API_KEY,
-                        "image": encoded_img
-                    }
-                    res = requests.post("https://api.imgbb.com/1/upload", data=payload)
-                    
-                    if res.status_code == 200:
-                        data = res.json()["data"]
-                        img_url = data["url"]
-                        delete_url = data["delete_url"]
-                        img_time = data["time"] # Timestamp chuẩn UNIX từ ImgBB
-                        
-                        st.success(f"✅ Ảnh đã lên ImgBB: {img_url}")
-                        st.image(img_url, width=250)
-                        
-                        # Truyền cả delete_url và img_time qua Firebase
-                        from firebase_manager import push_esp32_mock_request
-                        req_id = push_esp32_mock_request(img_url, delete_url, img_time)
-                        
-                        st.info(f"Đã tạo Request [{req_id}] trên Firebase.")
-                    else:
-                        st.error("Lỗi upload ImgBB!")
-            else:
-                st.warning("Bạn phải chọn ảnh trước!")
-
+        st.button("🚀 Mô phỏng gửi từ ESP32", type="primary", on_click=cb_simulate_esp32, args=(esp_file,))
 
 
     # ----------------------------------------------------
@@ -585,70 +693,12 @@ else:
                                 )
                                 reg_name = current_db[target_uid]["name"] if target_uid else ""
                                 
-                        if st.button("Lưu ảnh vào hệ thống", type="primary", use_container_width=True, key="hist_save_btn"):
-                            if not reg_name.strip():
-                                st.error("Vui lòng nhập/chọn tên!")
-                            else:
-                                with st.spinner("AI đang trích xuất khuôn mặt..."):
-                                    # Lấy ảnh OpenCV để đưa vào DeepFace
-                                    opencv_img = None
-                                    if img_path_or_url.startswith("http"):
-                                        opencv_img, fetch_err = fetch_image_from_url(img_path_or_url)
-                                        if opencv_img is not None: 
-                                            opencv_img = cv2.cvtColor(opencv_img, cv2.COLOR_BGR2RGB)
-                                    elif os.path.exists(img_path_or_url):
-                                        opencv_img = cv2.imread(img_path_or_url)
-                                        if opencv_img is not None: opencv_img = cv2.cvtColor(opencv_img, cv2.COLOR_BGR2RGB)
-
-                                    if opencv_img is not None:
-                                        embedding, bbox, err = get_face_embedding(opencv_img)
-                                        if err:
-                                            st.error(f"Thất bại: {err}")
-                                        else:
-                                            sample_id = f"sample_{int(time.time())}"
-                                            sample_data = {"embedding": embedding}
+                        st.button("Lưu ảnh vào hệ thống", type="primary", width='stretch', key="hist_save_btn", on_click=cb_save_hist_image, args=(reg_name, img_path_or_url, target_uid, current_db, is_mock_db_history, history_json_path))
+        
                                             
-                                            if is_mock_db_history:
-                                                safe_filename = "".join([c for c in reg_name if c.isalnum() or c in (' ', '_', '-')]).strip()
-                                                filename = f"{safe_filename}_{sample_id}.jpg"
-                                                full_img_path = os.path.join("./source/Face_Database", filename)
-                                                cv2.imwrite(full_img_path, cv2.cvtColor(opencv_img, cv2.COLOR_RGB2BGR))
-                                                sample_data["image_path"] = filename
-                                            else:
-                                                # Cố tình Re-upload lên ImgBB để tạo Link Xóa (Delete_URL) độc lập, 
-                                                # tránh lỗi xóa Log ở Lịch sử làm mất luôn cả ảnh trong DB
-                                                new_img_url, new_del_url = upload_to_imgbb(opencv_img)
-                                                if new_img_url:
-                                                    sample_data["image_url"] = new_img_url
-                                                    sample_data["delete_img_url"] = new_del_url
-                                            
-                                            # Cập nhật Dict DB
-                                            if target_uid not in current_db:
-                                                current_db[target_uid] = {"name": reg_name, "samples": {}}
-                                            
-                                            current_db[target_uid]["updated_at"] = datetime.now(tz_VN).strftime("%Y-%m-%d %H:%M:%S")
-                                            current_db[target_uid]["samples"][sample_id] = sample_data
-                                            
-                                            save_registered_db(current_db, is_mock_db_history, history_json_path)
-                                            st.success(f"🎉 Đã lưu thành công 1 góc mặt cho: {reg_name}")
-                                            time.sleep(1.5)
-                                            st.rerun()
-                                    else:
-                                        st.error("Lỗi: Không thể đọc được dữ liệu ảnh gốc!")
-
                     # --- THÊM TÍNH NĂNG XÓA LOG & MỞ TAB XÓA ẢNH IMGBB ---
                     st.write("") # Tạo khoảng trống
-                    if st.button("🗑️ Xóa nhật ký này", type="primary", width='stretch'):
-                        with st.spinner("Đang dọn dẹp dữ liệu..."):
-                            from firebase_manager import delete_history_log
-                            
-                            # 1. Xóa Log trên Firebase trước (Sạch dữ liệu hệ thống)
-                            delete_history_log(selected_data["ID"])
-                            if selected_data["Delete_URL"]:
-                                open_urls_in_new_tabs(selected_data["Delete_URL"])
-                                    
-                            time.sleep(1.5)
-                            st.rerun()
+                    st.button("🗑️ Xóa nhật ký này", type="primary", width='stretch', on_click=cb_delete_history_log, args=(selected_data["ID"], selected_data.get("Delete_URL")))
 
                 else:
                     # Trạng thái ban đầu khi người dùng mới vào tab và chưa bấm chọn dòng nào
@@ -795,60 +845,8 @@ else:
 
                 reg_file = st.file_uploader("Tải ảnh chân dung rõ mặt:", type=["jpg", "jpeg", "png"], key="reg_face_upload")
                 
-                if st.button("Lưu vào hệ thống", type="primary", width='stretch'):
-                    if not reg_name.strip():
-                        st.error("Vui lòng nhập/chọn tên!")
-                    elif reg_file is None:
-                        st.error("Vui lòng tải ảnh lên!")
-                    else:
-                        file_bytes = np.asarray(bytearray(reg_file.read()), dtype=np.uint8)
-                        opencv_img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-                        opencv_img = cv2.cvtColor(opencv_img, cv2.COLOR_BGR2RGB)
-                        
-                        with st.spinner("AI đang quét khuôn mặt..."):
-                            embedding, bbox, err = get_face_embedding(opencv_img)
-                            
-                            if err:
-                                st.error(f"Thất bại: {err}")
-                            else:
-                                current_time_str = datetime.now(tz_VN).strftime("%Y-%m-%d %H:%M:%S")
-                                safe_filename = "".join([c for c in reg_name if c.isalnum() or c in (' ', '_', '-')]).strip()
-                                sample_id = f"sample_{int(time.time())}"
-                                
-                                sample_data = {"embedding": embedding}
+                st.button("Lưu vào hệ thống", type="primary", width='stretch', on_click=cb_register_face, args=(reg_name, reg_file, target_uid, registered_db, is_mock_db, JSON_PATH))
 
-                                # NẾU LÀ LOCAL MOCK: Lưu file ảnh vào thư mục Face_Database
-                                if is_mock_db:
-                                    filename = f"{safe_filename}_{sample_id}.jpg"
-                                    full_img_path = os.path.join(DB_DIR, filename)
-                                    cv2.imwrite(full_img_path, cv2.cvtColor(opencv_img, cv2.COLOR_RGB2BGR))
-                                    sample_data["image_path"] = filename
-                                else:
-                                    # NẾU LÀ FIREBASE: Upload ảnh lên ImgBB lấy URL online
-                                    img_url, del_url = upload_to_imgbb(opencv_img)
-                                    if img_url:
-                                        sample_data["image_url"] = img_url
-                                        sample_data["delete_img_url"] = del_url
-                                    else:
-                                        st.error("Không thể upload ảnh lên ImgBB, vui lòng thử lại!")
-                                        st.stop()
-                                
-                                # Cập nhật cấu trúc dict
-                                if target_uid not in registered_db or not isinstance(registered_db[target_uid], dict):
-                                    registered_db[target_uid] = {"name": reg_name, "samples": {}}
-                                
-                                registered_db[target_uid]["updated_at"] = current_time_str
-                                if "samples" not in registered_db[target_uid]:
-                                    registered_db[target_uid]["samples"] = {}
-                                    
-                                registered_db[target_uid]["samples"][sample_id] = sample_data
-
-                                # Đồng bộ lưu lại
-                                save_registered_db(registered_db, is_mock_db, JSON_PATH)
-                                    
-                                st.success(f"🎉 Đã lưu thành công 1 góc mặt cho: {reg_name}")
-                                time.sleep(1)
-                                st.rerun()
                                 
             # ----------------------------------------------------
             # CỘT PHẢI: XEM DANH SÁCH & BẤM VÀO ĐỂ HIỆN ẢNH XÓA
@@ -921,58 +919,9 @@ else:
                             st.write("")
                             
                             # XÓA 1 ẢNH
-                            if st.button("🗑️ Chỉ xóa ảnh này", type="primary", width='stretch'):
-                                # import streamlit.components.v1 as components
-                                
-                                # Xóa file local nếu có
-                                if del_filename:
-                                    p = os.path.join(DB_DIR, del_filename)
-                                    if os.path.exists(p): os.remove(p)
-                                
-                                # Nếu có link hủy ImgBB -> Bật tab mới cho người dùng bấm xóa
-                                if del_imgbb_url and del_imgbb_url.startswith("http"):
-                                    open_urls_in_new_tabs(del_imgbb_url)
-                                
-                                if del_sid in registered_db[del_uid]["samples"]:
-                                    del registered_db[del_uid]["samples"][del_sid]
-                                
-                                if not registered_db[del_uid]["samples"]:
-                                    del registered_db[del_uid]
-                                
-                                save_registered_db(registered_db, is_mock_db, JSON_PATH)
-                                st.success("Đã xóa dữ liệu thành công!")
-                                time.sleep(1.5)
-                                st.rerun()
-                                
+                            st.button("🗑️ Chỉ xóa ảnh này", type="primary", width='stretch', on_click=cb_delete_single_sample, args=(del_uid, del_sid, del_filename, del_imgbb_url))
+
                             st.write("")
                             
                             # XÓA TOÀN BỘ NGƯỜI
-                            if st.button("🚨 Xóa toàn bộ người này", type="secondary", width='stretch'):
-                                import streamlit.components.v1 as components
-                                
-                                del_urls = []
-                                # 1. Duyệt qua tất cả ảnh mẫu của người này
-                                for sid, sinfo in registered_db[del_uid].get("samples", {}).items():
-                                    # Xóa file vật lý local (nếu chạy mode Local)
-                                    f_name = sinfo.get("image_path")
-                                    if f_name:
-                                        p = os.path.join(DB_DIR, f_name)
-                                        if os.path.exists(p): 
-                                            os.remove(p)
-                                            
-                                    # Gom link xóa ImgBB (nếu chạy mode Firebase)
-                                    d_url = sinfo.get("delete_img_url")
-                                    if d_url and d_url.startswith("http"):
-                                        del_urls.append(d_url)
-                                
-                                # 2. Bật Tab mới cho tất cả các link xóa ảnh ImgBB của người này
-                                if del_urls:
-                                    open_urls_in_new_tabs(del_urls)
-                                
-                                # 3. Xóa hoàn toàn user khỏi Database
-                                del registered_db[del_uid]
-                                save_registered_db(registered_db, is_mock_db, JSON_PATH)
-                                
-                                st.success(f"🎉 Đã xóa toàn bộ hồ sơ của {del_name}!")
-                                time.sleep(1.5)
-                                st.rerun()
+                            st.button("🚨 Xóa toàn bộ người này", type="secondary", width='stretch', on_click=cb_delete_entire_user, args=(del_uid, del_name))
