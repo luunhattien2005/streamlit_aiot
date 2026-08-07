@@ -220,16 +220,13 @@ tz_VN = timezone(timedelta(hours=7))
 # HÀM HỖ TRỢ XỬ LÝ POP-UP IMGBB (ROLLBACK COMPONENT V1)
 # ========================================================
 def open_urls_in_new_tabs(urls):
-    """Mở tab mới bằng component.v1 kết hợp thời gian trễ"""
+    """Lưu danh sách URL cần mở vào session_state để xử lý ở cuối script"""
     if isinstance(urls, str): 
         urls = [urls]
         
-    js_code = "".join([f"window.open('{u}', '_blank');" for u in urls if u and u.startswith("http")])
-    
-    if js_code:
-        import streamlit.components.v1 as components
-        # Gọi Component V1 và ép height=0 để nó tàng hình trên giao diện
-        components.html(f"<script>{js_code}</script>", height=0)
+    valid_urls = [u for u in urls if u and u.startswith("http")]
+    if valid_urls:
+            st.session_state["pending_open_urls"] = valid_urls
 
 st.set_page_config(page_title="Hệ thống Cửa thông minh AIoT", layout="wide")
 
@@ -310,10 +307,12 @@ if not is_mock("mock_database"):
 # ========================================================
 # CÁC HOẠT ĐỘNG NGẰM TRONG TRANG WEB 
 # ========================================================
-if st.session_state.get("auto_sync", True):
-    # Lấy giá trị ui_refresh_rate (giây), mặc định là 10s, rồi nhân với 1000 ra mili-giây
-    interval_ms = st.session_state.get("ui_refresh_rate", 10) * 1000
-    st_autorefresh(interval=interval_ms, key="auto_check_new_request")
+is_auto = st.session_state.get("auto_sync", True)
+# Lấy giá trị ui_refresh_rate (giây), mặc định là 10s
+refresh_rate = st.session_state.get("ui_refresh_rate", 10)
+# Nếu tắt auto_sync, đặt interval thành 1 giờ (3,600,000 ms) để nó đứng yên
+interval_ms = (refresh_rate if is_auto else 3600) * 1000
+st_autorefresh(interval=interval_ms, key="auto_check_new_request")
 
 registered_db, is_mock_db, JSON_PATH = load_registered_db()
 
@@ -934,3 +933,14 @@ else:
                             
                             # XÓA TOÀN BỘ NGƯỜI
                             st.button("🚨 Xóa toàn bộ người này", type="secondary", width='stretch', on_click=cb_delete_entire_user, args=(del_uid, del_name))
+
+# ========================================================
+# XỬ LÝ MỞ TAB IMGBB (ĐẶT Ở CUỐI CÙNG FILE ĐỂ KHÔNG NHẢY TAB)
+# ========================================================
+if "pending_open_urls" in st.session_state and st.session_state["pending_open_urls"]:
+    urls_to_open = st.session_state.pop("pending_open_urls")
+    js_code = "".join([f"window.open('{u}', '_blank');" for u in urls_to_open])
+    if js_code:
+        import streamlit.components.v1 as components
+        components.html(f"<script>{js_code}</script>", height=0)
+

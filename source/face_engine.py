@@ -25,20 +25,12 @@ def get_face_embedding(img):
     if img is None or img.size == 0:
         return None, None, "Ảnh tải lên không hợp lệ hoặc bị rỗng!"
     try:
-        #Mô hình VGG-Face
-        # res = DeepFace.represent(
-        #     img_path=img, 
-        #     model_name="VGG-Face", 
-        #     enforce_detection=True,
-        #     detector_backend="mtcnn"
-        # )
-
         # Mô hình Facenet512
         res = DeepFace.represent(
             img_path=img, 
             model_name="Facenet512", 
             enforce_detection=True,
-            detector_backend="mtcnn" # ssd
+            detector_backend="ssd" # ssd
         )
 
         if len(res) > 0:
@@ -111,20 +103,12 @@ def warmup_ai_model():
     dummy_img = np.zeros((224, 224, 3), dtype=np.uint8)
     # Ép DeepFace chạy trước một lần, bỏ qua bước check khuôn mặt thật
     try:
-        #Mô hình VGG-Face
-        # DeepFace.represent(
-        #     img_path=dummy_img, 
-        #     model_name="VGG-Face", 
-        #     enforce_detection=True,
-        #     detector_backend="mtcnn"
-        # )
-
         # Mô hình Facenet512
         DeepFace.represent(
             img_path=dummy_img, 
             model_name="Facenet512", 
             enforce_detection=True,
-            detector_backend="mtcnn" # ssd
+            detector_backend="ssd" # ssd
         )
     except Exception:
         pass
